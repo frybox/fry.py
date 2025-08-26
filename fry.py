@@ -1,3 +1,6 @@
+import unicodedata
+import string
+
 NUMBER          = 'number'
 SINGLE_STRING   = 'single-string'
 DOUBLE_STRING   = 'double-string'
@@ -37,14 +40,39 @@ class AstNode:
         return self.value[-1]
 
 
-def issymbolchar(ch):
-    return ch.isalnum() or ch == '_' or ch == '-'
+# ascii字符的printable字符（string.printable)共有100个字符，包括：
+# - 26个大写字母   (string.ascii_uppercase)
+# - 26个小写字母   (string.ascii_lowercase)
+# - 10个阿拉伯数字 (string.digits)
+# - 32个标点符号   (string.punctuation)
+# - 6个空白字符    (string.whitespace)
+# 6个空白字符: [9, 13] or 32
+# 其他94个printable字符: [33, 127)
+# str.isspace()包含对全角空格等空白字符的检测，比下面这个is_whitespace_ascii强
+def is_whitespace_ascii(ch):
+    n = ord(ch)
+    return n == 32 or (n >= 9 and n <=13)
 
-def ismultisymbolchar(ch):
-    return issymbolchar(ch) or ch == '.'
+def is_visible_ascii(ch):
+    n = ord(ch)
+    return n >= 32 and n < 127
 
-def issymbolstartchar(ch):
-    return ch.isalpha() or ch == '_'
+def is_visible_utf8(ch):
+    if is_visible_ascii(ch):
+        return True
+    category = unicodedata.category(ch)
+    if category[0] in 'CZ' or category in ('Mn', 'Me'):
+        return False
+    return True
+
+def is_intern(ch):
+    return is_visible_utf8(ch) and ch not in ':;,\'"`()[]{}'
+
+def is_identifier(ch):
+    return is_intern(ch) and ch not in '&@#.'
+
+def is_multi_identifier(ch):
+    return is_intern(ch) and ch not in  '&@#'
 
 def parse(code):
     size = len(code)
@@ -76,14 +104,14 @@ def parse(code):
 
     def skipspace():
         """
-        略过空白字符和注释。
-        如果存在空白字符和注释，设置hasspace为True
+        略过空白字符。
+        空白字符字符串不跨行(空白字符不包括\n)，空行用来分隔反引号字符串
+        如果存在空白字符，设置hasspace为True
         """
         nonlocal hasspace
-        hasspace = False
         ch = getc()
         while ch:
-            if ch.isspace():
+            if ch != '\n' and ch.isspace():
                 hasspace = True
                 ch = getc()
             else:
@@ -113,18 +141,22 @@ def parse(code):
             # 除了列表开头元素/列表结束字符以及注释，其他元素前必须有空白字符
             error("list element except first one should start with space")
 
+        hasspace = False
+
         if ch in '([{':
             listbegin = True
         else:
             listbegin = False
 
         if ch != '`' and backstr:
-            # 当前不是backtick字符串了，前面有backtick字符串的话，需要合并为一个字符串
-            # 注：注释也会把backtick字符串分开
+            # 当前不是backtick字符串了，前面有backtick字符串行的话，合并为一个字符串
+            # 注：遇到注释和空行，多行backtick字符串也不能合并
             construct(BACKTICK_STRING, '\n'.join(backstr))
             backstr = []
 
-        if ch == ';':
+        if ch == '\n':
+            hasspace = True
+        elif ch == ';':
             ch = getc()
             while ch:
                 if ch == '\n':
