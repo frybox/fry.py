@@ -46,9 +46,6 @@ def ismultisymbolchar(ch):
 def issymbolstartchar(ch):
     return ch.isalpha() or ch == '_'
 
-def isspace(ch):
-    return ch.isspace() or ch == ';'
-
 def parse(code):
     size = len(code)
     i = 0
@@ -89,12 +86,6 @@ def parse(code):
             if ch.isspace():
                 hasspace = True
                 ch = getc()
-            elif ch == ';':
-                hasspace = True
-                ch = getc()
-                while ch:
-                    if ch == '\n': break
-                    ch = getc()
             else:
                 ungetc(ch)
                 break
@@ -102,8 +93,11 @@ def parse(code):
     def construct(t, v=None):
         ch = getc()
         suffix = None
-        if ch == ':' suffix = ch
-        ungetc(ch)
+        if ch == ':'
+            suffix = ch
+            ungetc(ch)
+        elif ch == ',':
+            pass
         node = AstNode(t, v, suffix)
         stack[-1].append(node)
 
@@ -114,8 +108,9 @@ def parse(code):
         if not ch:
             break
         listend = ch in ')]}'
-        if not listbegin and not listend and not hasspace:
-            # 除了列表开头元素和列表结束字符，其他元素前必须有空白字符
+        comment = ch == ';'
+        if not (listbegin or listend or comment) and not hasspace:
+            # 除了列表开头元素/列表结束字符以及注释，其他元素前必须有空白字符
             error("list element except first one should start with space")
 
         if ch in '([{':
@@ -125,10 +120,18 @@ def parse(code):
 
         if ch != '`' and backstr:
             # 当前不是backtick字符串了，前面有backtick字符串的话，需要合并为一个字符串
+            # 注：注释也会把backtick字符串分开
             construct(BACKTICK_STRING, '\n'.join(backstr))
             backstr = []
 
-        if ch == '`':
+        if ch == ';':
+            ch = getc()
+            while ch:
+                if ch == '\n':
+                    ungetc(ch)
+                    break
+                ch = getc()
+        elif ch == '`':
             chars = []
             ch = getc()
             while ch:
