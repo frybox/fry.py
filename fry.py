@@ -1,34 +1,48 @@
+#!/usr/bin/env python
 import unicodedata
 import string
+import pprint
 
-NUMBER          = 'number'
-SINGLE_STRING   = 'single-string'
-DOUBLE_STRING   = 'double-string'
-BACKTICK_STRING = 'backtick-string'
-SYMBOL          = 'symbol'             #符号
-MULTI_SYMBOL    = 'multi-symbol'       #联符
-IDENTIFIER      = 'identifier'
-DO_LIST         = 'do-list'
-MATCH_LIST      = 'match-list'
-CASE_LIST       = 'case-list'
-DEFAULT_LIST    = 'default-list'
-COND_LIST       = 'cond-list'
-IF_LIST         = 'if-list'
-ELIF_LIST       = 'elif-list'
-ELSE_LIST       = 'else-list'
-WHILE_LIST      = 'while-list'
-FOR_LIST        = 'for-list'
-EACH_LIST       = 'each-list'
-LIST_LIST       = 'list-list'
-DICT_LIST       = 'dict-list'
-FN_LIST         = 'fn-list'
-CALL_LIST       = 'call-list'
-LET_LIST        = 'let-list'
-VAR_LIST        = 'var-list'
-IMPORT_LIST     = 'import-list'
+INTEGER           = 'integer'
+FLOAT             = 'float'
+SINGLE_STRING     = 'single-string'
+DOUBLE_STRING     = 'double-string'
+BACKTICK_STRING   = 'backtick-string'
+INTERN_STRING     = 'intern-string'
+IDENTIFIER        = 'identifier'
+MULTI_IDENTIFIER  = 'multi-identifier'
+LIST_REMINDER     = 'list-reminder'
+VARARG            = 'vararg'
+TRUE              = 'true'
+FALSE             = 'false'
+NONE              = 'none'
+CODE_LIST         = 'code-list'
+LIST_LIST         = 'list-list'
+DICT_LIST         = 'dict-list'
+HASHFN_LIST       = 'hashfn-list'
+
+DO_LIST           = 'do-list'
+MATCH_LIST        = 'match-list'
+CASE_LIST         = 'case-list'
+DEFAULT_LIST      = 'default-list'
+COND_LIST         = 'cond-list'
+IF_LIST           = 'if-list'
+ELIF_LIST         = 'elif-list'
+ELSE_LIST         = 'else-list'
+WHILE_LIST        = 'while-list'
+FOR_LIST          = 'for-list'
+EACH_LIST         = 'each-list'
+LIST_LIST         = 'list-list'
+DICT_LIST         = 'dict-list'
+KV_PAIR           = 'kv-pair'
+FN_LIST           = 'fn-list'
+CALL_LIST         = 'call-list'
+LET_LIST          = 'let-list'
+VAR_LIST          = 'var-list'
+IMPORT_LIST       = 'import-list'
 
 class AstNode:
-    def __init__(self, tag, value, suffix=None):
+    def __init__(self, tag, value=None, suffix=None):
         self.tag = tag
         self.value = value
         self.suffix = suffix
@@ -39,6 +53,9 @@ class AstNode:
     def last(self):
         return self.value[-1]
 
+    def __repr__(self):
+        return f"{self.tag}({self.suffix}):\n  {self.value}"
+
 
 # ascii字符的printable字符（string.printable)共有100个字符，包括：
 # - 26个大写字母   (string.ascii_uppercase)
@@ -48,7 +65,9 @@ class AstNode:
 # - 6个空白字符    (string.whitespace)
 # 6个空白字符: [9, 13] or 32
 # 其他94个printable字符: [33, 127)
-# str.isspace()包含对全角空格等空白字符的检测，比下面这个is_whitespace_ascii强
+
+# str.isspace()除了6个ascii空白字符外，还包含对全角空格等空白字符的检测，
+# 比下面这个is_whitespace_ascii强
 def is_whitespace_ascii(ch):
     n = ord(ch)
     return n == 32 or (n >= 9 and n <=13)
@@ -58,6 +77,8 @@ def is_visible_ascii(ch):
     return n >= 32 and n < 127
 
 def is_visible_utf8(ch):
+    if ch.isspace():
+        return False
     if is_visible_ascii(ch):
         return True
     category = unicodedata.category(ch)
@@ -78,7 +99,7 @@ def parse(code):
     size = len(code)
     i = 0
     prefetch = []
-    root = AstNode(DO_LIST, [])
+    root = AstNode(CODE_LIST, [])
     stack = [root]
 
     # listbegin元素前无需空白字符，其他元素前必须有空白字符
@@ -99,13 +120,59 @@ def parse(code):
     def ungetc(ch):
         prefetch.append(ch)
 
+    def get_intern():
+        chars = []
+        ch = getc()
+        while ch:
+            if is_intern(ch):
+                chars.append(ch)
+                ch = getc()
+            else:
+                ungetc(ch)
+                break
+        return ''.join(chars)
+
+    def get_identifier():
+        chars = []
+        ch = getc()
+        while ch:
+            if is_identifier(ch):
+                chars.append(ch)
+                ch = getc()
+            else:
+                ungetc(ch)
+                break
+        return ''.join(chars)
+
+    def get_multi_identifier():
+        chars = []
+        ch = getc()
+        while ch:
+            if is_multi_identifier(ch):
+                chars.append(ch)
+                ch = getc()
+            else:
+                ungetc(ch)
+                break
+        return ''.join(chars)
+
+    def tonumber(s):
+        try:
+            return 'int', int(s, 0)
+        except ValueError:
+            try:
+                return 'float', float(s)
+            except ValueError:
+                return 'nan', 0
+
     def error(msg):
-        raise msg
+        print(root)
+        raise RuntimeError(msg)
 
     def skipspace():
         """
         略过空白字符。
-        空白字符字符串不跨行(空白字符不包括\n)，空行用来分隔反引号字符串
+        空白字符字符串不跨行(这里的空白字符不包括\n)，空行用来分隔反引号字符串
         如果存在空白字符，设置hasspace为True
         """
         nonlocal hasspace
@@ -121,14 +188,26 @@ def parse(code):
     def construct(t, v=None):
         ch = getc()
         suffix = None
-        if ch == ':'
+        if ch == ':':
             suffix = ch
-            ungetc(ch)
         elif ch == ',':
             pass
-        node = AstNode(t, v, suffix)
-        stack[-1].append(node)
+        else:
+            ungetc(ch)
 
+        node = AstNode(t, v)
+        parent = stack[-1]
+        if parent.tag == HASHFN_LIST:
+            parent.append(node)
+            parent.suffix = suffix
+            stack.pop()
+        else:
+            node.suffix = suffix
+            if parent.tag in (CODE_LIST, LIST_LIST, DICT_LIST):
+                parent.append(node)
+        if t in (HASHFN_LIST, CODE_LIST, LIST_LIST, DICT_LIST):
+            stack.append(node)
+        return node
 
     while True:
         skipspace()
@@ -137,9 +216,10 @@ def parse(code):
             break
         listend = ch in ')]}'
         comment = ch == ';'
-        if not (listbegin or listend or comment) and not hasspace:
-            # 除了列表开头元素/列表结束字符以及注释，其他元素前必须有空白字符
-            error("list element except first one should start with space")
+        newline = ch == '\n'
+        if not (listbegin or listend or comment or newline) and not hasspace:
+            # 除了列表开头元素/列表结束字符以及注释和新行，其他元素前必须有空白字符
+            error(f"{ch}: list element except first one should start with space")
 
         hasspace = False
 
@@ -149,9 +229,20 @@ def parse(code):
             listbegin = False
 
         if ch != '`' and backstr:
-            # 当前不是backtick字符串了，前面有backtick字符串行的话，合并为一个字符串
-            # 注：遇到注释和空行，多行backtick字符串也不能合并
-            construct(BACKTICK_STRING, '\n'.join(backstr))
+            # 当前不是backtick字符串了，前面有连续的backtick字符串行的话，
+            # 合并为一个字符串
+            # 注：遇到注释和空行，多行backtick字符串也不能合并，这对于
+            #     连续两个多行backtick字符串参数很有用，如函数docstring
+            #     和返回一个字符串的情况：
+            # (fn foo []:
+            #   `这是函数foo
+            #   `
+            #   `本函数没有参数，返回一段神秘字符串
+            #
+            #   `这是神秘字符串开始
+            #   `这是神秘字符串结束
+            # )
+            construct(BACKTICK_STRING, ''.join(backstr))
             backstr = []
 
         if ch == '\n':
@@ -160,7 +251,7 @@ def parse(code):
             ch = getc()
             while ch:
                 if ch == '\n':
-                    ungetc(ch)
+                    hasspace = True
                     break
                 ch = getc()
         elif ch == '`':
@@ -169,7 +260,7 @@ def parse(code):
             while ch:
                 chars.append(ch)
                 if ch == '\n':
-                    ungetc(ch)
+                    hasspace = True
                     break
                 ch = getc()
             chars = ''.join(chars)
@@ -200,54 +291,80 @@ def parse(code):
                     ch = getc()
             else: error("string is not closed")
         elif ch == ':':
-            chars = []
-            ch = getc()
-            if issymbolstartchar(ch):
-                chars.append(ch)
-            else:
-                error("invalid symbol")
-            while ch:
-                if issymbolchar(ch):
-                    chars.append(ch)
-                    ch = getc()
-                else: break
-            construct(SYMBOL, ''.join(chars))
+            s = get_intern()
+            if not s:
+                error("invalid intern string")
+            construct(INTERN_STRING, s)
         elif ch == '&':
-            pass
-        elif ch == '.':
-            pass
-        elif ch == '+':
-            pass
-        elif ch == '-':
-            pass
-        elif ch == '*':
-            pass
-        elif ch == '/':
-            pass
-        elif ch == '=':
-            pass
-        elif ch == '!':
-            pass
-        elif ch == '>':
-            pass
-        elif ch == '<':
-            pass
+            s = get_identifier()
+            if not s:
+                error("invalid reminder list identifier")
+            construct(LIST_REMINDER, s)
+        elif ch == '#':
+            construct(HASHFN_LIST, [])
         elif ch == '(':
-            pass
+            construct(CODE_LIST, [])
         elif ch == ')':
-            pass
+            if stack[-1].tag != '(':
+                error("')' without paired '('")
+            stack.pop()
         elif ch == '[':
-            pass
+            construct(LIST_LIST, [])
         elif ch == ']':
-            pass
+            if stack[-1].tag != '[':
+                error("']' without paired '['")
+            stack.pop()
         elif ch == '{':
-            pass
+            construct(DICT_LIST, [])
         elif ch == '}':
-            pass
+            if stack[-1].tag != '{':
+                error("'}' without paired '{'")
+            stack.pop()
         else:
-            pass
-
+            ungetc(ch)
+            s = get_multi_identifier()
+            if not s:
+                error("invalid character")
+            nt, n = tonumber(s)
+            if nt == 'int':
+                construct(INTEGER, n)
+            elif nt == 'float':
+                construct(FLOAT, n)
+            elif s == 'true':
+                construct(TRUE)
+            elif s == 'false':
+                construct(FALSE)
+            elif s == 'none':
+                construct(NONE)
+            elif s == '...':
+                construct(VARARG)
+            elif s in ('..', '.'):
+                construct(IDENTIFIER, s)
+            elif s[0] == '.':
+                s = s[1:]
+                if '.' in s:
+                    construct(CODE_LIST, [AstNode(IDENTIFIER, '.'), AstNode(MULTI_IDENTIFIER, s)])
+                else:
+                    construct(CODE_LIST, [AstNode(IDENTIFIER, '.'), AstNode(IDENTIFIER, s)])
+                stack.pop()
+            elif '.' in s:
+                construct(MULTI_IDENTIFIER, s)
+            else:
+                construct(IDENTIFIER, s)
     if backstr:
-        construct(BACKTICK_STRING, '\n'.join(backstr))
+        construct(BACKTICK_STRING, ''.join(backstr))
         backstr = []
     return root
+
+if __name__ == '__main__':
+    import sys
+    if len(sys.argv) != 2:
+        print(f"usage: {sys.argv[0]} <.fry file>")
+        sys.exit(1)
+    with open(sys.argv[1]) as f:
+        data = f.read()
+    ast = parse(data)
+    pprint.pprint(ast)
+
+    pprint.pprint(sys.argv)
+
