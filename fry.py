@@ -394,7 +394,7 @@ if __name__ == '__main__':
     if len(sys.argv) != 2:
         print(f"usage: {sys.argv[0]} <.fry file>")
         sys.exit(1)
-    with open(sys.argv[1]) as f:
+    with open(sys.argv[1], encoding='utf-8') as f:
         data = f.read()
     ast = parse(data)
     print(ast)
