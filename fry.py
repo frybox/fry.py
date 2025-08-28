@@ -227,6 +227,8 @@ def parse(code):
         if stack[-1].tag != t:
             print(stack[-1])
             error("unpaired )/]/}")
+        if stack[-1] is root:
+            error("redundant ')'")
         node = stack.pop()
         return finish_node(node)
 

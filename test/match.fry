@@ -14,3 +14,11 @@
     (print a b))
   (case (values :ab ...): (print :ab ...))
   (default: (print :default)))
+
+(fn foo []:
+  (values 1 2 3))
+(match (foo):
+  (case (values a ...):
+    (print a)
+    (print ...))
+  (default: (print :default)))

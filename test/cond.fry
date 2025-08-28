@@ -1,0 +1,57 @@
+(let const-value :const-data)
+(let mylist [1 2 3 4 5])
+(let mymap {mylist, key1: 10, key2: "hello"})
+(var foo 0)
+(if (<= 0 foo):
+  (print :hello :ok))
+
+; 1. 只有if关键字表示只有一个条件判断，没有elif和else，body部分可以有多条语句
+(if (or false true):
+  (print "this is false or true")
+  (print "foo and bar")
+  (print :end))
+
+; 2. cond表达式可以有多个条件，每个条件是一个if/elif子句，最后可以有一个匹配所有条件的else子句
+;    elif是需要的，否则给人的感觉是多个if都可执行，实际上只有一个可执行
+(cond:
+  (if (or false true):
+    (print 'this is false or true')
+    (print :end))
+  (elif (and foo bar):
+    (print 'foo and bar'))
+  (else: (print :else)))  ; 只有header/body这种模式的参数列表中，header后才需要冒号后缀，else没有冒号后缀
+
+; good old while
+(while (or false true):
+  (print 'this is false or true')
+  (print 'good end'))
+
+; for range
+(for [i begin end step?]:
+  (print i))
+
+; each
+(each [item mylist]:
+  (print item))
+
+(each [key value mymap]:
+  (print key value))
+
+; 支持break和continue
+(for [i 0 20]:
+  (if (< i 15): (break))
+  (if (!= i 17): (continue))
+  (print i))
+
+(var i 0)
+(cond:
+  (while (< i 10):
+    (print i)
+    (set i (+ i 1)))
+  (else:
+    (print :end)))
+(cond:
+  (for [i 0 10]:
+    (print i))
+  (else:
+    (print :end)))
