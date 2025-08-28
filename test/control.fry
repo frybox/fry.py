@@ -11,15 +11,13 @@
   (print "foo and bar")
   (print :end))
 
-; 2. cond表达式可以有多个条件，每个条件是一个if/elif子句，最后可以有一个匹配所有条件的else子句
-;    elif是需要的，否则给人的感觉是多个if都可执行，实际上只有一个可执行
-(cond:
-  (if (or false true):
-    (print 'this is false or true')
-    (print :end))
-  (elif (and foo bar):
-    (print 'foo and bar'))
-  (else: (print :else)))  ; 只有header/body这种模式的参数列表中，header后才需要冒号后缀，else没有冒号后缀
+; 2. if后可以有多个elif子句，最后可以有一个匹配所有条件的else子句
+(if (or false true):
+  (print 'this is false or true')
+  (print :end))
+(elif (and foo bar):
+  (print 'foo and bar'))
+(else: (print :else))  ; 只有header/body这种模式的参数列表中，header后才需要冒号后缀，else没有冒号后缀
 
 ; good old while
 (while (or false true):
@@ -44,14 +42,11 @@
   (print i))
 
 (var i 0)
-(cond:
-  (while (< i 10):
-    (print i)
-    (set i (+ i 1)))
-  (else:
-    (print :end)))
-(cond:
-  (for [i 0 10]:
-    (print i))
-  (else:
-    (print :end)))
+(while (< i 10):
+  (print i)
+  (set i (+ i 1)))
+(else: (print :end))
+
+(for [i 0 10]:
+  (print i))
+(else: (print :end))
