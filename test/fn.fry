@@ -1,0 +1,62 @@
+(fn foo [a b]:
+  `This is function foo.
+  `
+  `A great function that has two arguments:
+  ` - a: first argument
+  ` - b: second arguments
+  `Return some great value
+
+  `This is the great value
+)
+
+(fn foo [a1 a2]:
+  `This is a great function.
+  `
+  `There are two great arguments: a1 and a2
+  `a1 - great argument one
+  `a2 - great argument two
+  `you can use this function anywhere
+  (print 'hello' " " :world))
+
+(fn _extract_text_by_file_extension [file_content, file_extension]:
+  `Extract text from a file based on its file extension.
+  (match file_extension:
+    (case (or :.txt :.markdown :.md :.html :.htm :.xml :.vtt):
+      (_extract_text_from_plain_text file_content))
+    (case :.json:
+      (_extract_text_from_json file_content))
+    (case (or :.yaml :.yml):
+      (_extract_text_from_yaml file_content))
+    (case :.pdf:
+      (_extract_text_from_pdf file_content))
+    (case ".doc":
+      (_extract_text_from_doc file_content))
+    (case ".docx":
+      (_extract_text_from_docx file_content))
+    (case ".csv":
+      (_extract_text_from_csv file_content))
+    (case (or ".xls" ".xlsx"):
+      (_extract_text_from_excel file_content))
+    (case ".ppt":
+      (_extract_text_from_ppt file_content))
+    (case ".pptx":
+      (_extract_text_from_pptx file_content))
+    (case ".epub":
+      (_extract_text_from_epub file_content))
+    (case ".eml":
+      (_extract_text_from_eml file_content))
+    (case ".msg":
+      (_extract_text_from_msg file_content))
+    (default:
+      (raise (UnsupportedFileTypeError (.. "Unsupported Extension Type: " file_extension))))))
+
+(let foo (fn []: (print :hello :world)))
+
+(let bar #(print :hello :world))
+
+(map #(print $2 $1 $1) mymap)
+
+`This is the return value.
+`返回的是一个字符串。
+`包含了中英文。
+`over.

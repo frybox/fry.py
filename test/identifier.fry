@@ -1,0 +1,8 @@
+(let ~!$%^*_-+|\=<>/? 10) ; 这些都是合法标识符字符
+; (let &@#. 100) ;不合法的标识符字符
+(let foo {foo1: {foo2: {foo3: "real value"}}})
+(let bar foo.foo1.foo2.foo3) ; bar为"real value", foo.foo1.foo2.foo3是multi-symbol
+(let foo3 :foo3)
+(let bar1 (. foo :foo1 :foo2 foo3)) ;bar1也是"real value"，.是解构运算符
+(let bar2 (. foo))
+(let b (= bar2 foo (. foo) .foo)) ; b为true

@@ -1,4 +1,0 @@
-; 这是import
-(import xoo bar :koo.bar)
-;(import [foo &bar] "foo/bar")
-;(import {foo, bar: bar1} 'foo/bar')

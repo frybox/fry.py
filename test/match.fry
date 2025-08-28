@@ -1,0 +1,16 @@
+(match foo:
+  (case none: (print :none))
+  (case [true false]: (print :true :false))
+  (case bar: (print bar))
+  (case [a b &c]: (print a b c))
+  (case [:abc :def]: (print :abc :def))
+  (case {a, b, c: c1}:
+    (print a b c1))
+  (case (and {a b} (< 0 a) (< b 10)):
+    (print a b))
+  (case (or [:abc 2.4 .foo] [:def 3.9 .bar.foo]):
+    (print foo))
+  (case (values a b :def _):
+    (print a b))
+  (case (values :ab ...): (print :ab ...))
+  (default: (print :default)))
