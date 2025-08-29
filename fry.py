@@ -5,13 +5,15 @@ import string
 NONE              = 'none'
 TRUE              = 'true'
 FALSE             = 'false'
-VARARG            = '...'
 INTEGER           = 'integer'
 FLOAT             = 'float'
 SINGLE_STRING     = 'single-string'
 DOUBLE_STRING     = 'double-string'
 BACKTICK_STRING   = 'backtick-string'
+EXTERN_STRING     = 'extern-string'   # extern = single + double + backtick
 INTERN_STRING     = 'intern-string'
+STRING            = 'string'          # string = extern + intern
+VARARG            = '...'
 IDENTIFIER        = 'identifier'
 MULTI_IDENTIFIER  = 'multi-identifier'
 AND_REMINDER      = 'and-reminder'
@@ -64,6 +66,7 @@ LT_LIST           = '<-list'
 GT_LIST           = '>-list'
 LE_LIST           = '<=-list'
 GE_LIST           = '>=-list'
+IS_LIST           = 'is-list'  #同一个对象，地址相同
 MAP_LIST          = 'map-list'
 LEN_LIST          = 'len-list'
 
@@ -123,6 +126,12 @@ class Scope:
 
     def append(self, child):
         self.children.append(child)
+
+
+class Value:
+    def __init__(self, tag, value=None):
+        self.tag = tag
+        self.value = value
 
 
 # ascii字符的printable字符（string.printable)共有100个字符，包括：
@@ -441,11 +450,45 @@ def interpret(root):
     interns = set()
     g = Scope()
     scopes = [g]
+    none = Value(NONE)
+    true = Value(TRUE)
+    false = Value(FALSE)
 
-    def run(ast, scope):
-        pass
+    def error(msg):
+        raise RuntimeError(msg)
 
-    run(root, g)
+    def eval(ast, scope):
+        if ast.tag == NONE:
+            return none
+        elif ast.tag == TRUE:
+            return true
+        elif ast.tag == FALSE:
+            return false
+        elif ast.tag in (INTEGER, FLOAT):
+            return Value(ast.tag, ast.value)
+        elif ast.tag in (SINGLE_STRING, DOUBLE_STRING, BACKTICK_STRING, INTERN_STRING):
+            return Value(STRING, ast.value)
+        elif ast.tag == VARARG:
+            pass
+        elif ast.tag == IDENTIFIER:
+            pass
+        elif ast.tag == MULTI_IDENTIFIER:
+            pass
+        elif ast.tag == AND_REMINDER:
+            pass
+        elif ast.tag == AT_WHOLE:
+            pass
+        elif ast.tag == CODE_LIST:
+            pass
+        elif ast.tag == HASH_LIST:
+            pass
+        elif ast.tag == LIST_LIST:
+            pass
+        elif ast.tag == DICT_LIST:
+            pass
+        else:
+            error(f"invalid ast: {ast}")
+    return eval(root, g)
     
 
 if __name__ == '__main__':
