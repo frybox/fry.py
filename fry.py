@@ -79,9 +79,6 @@ class AstNode:
     def append(self, value):
         self.value.append(value)
 
-    def last(self):
-        return self.value[-1]
-
     def __repr__(self):
         if self.tag in (NONE, TRUE, FALSE, VARARG):
             value = self.tag
@@ -479,7 +476,7 @@ def interpret(root):
         elif ast.tag in (SINGLE_STRING, DOUBLE_STRING, BACKTICK_STRING, INTERN_STRING):
             return Value(STRING, ast.value)
         elif ast.tag == VARARG:
-            pass
+            return Value(VARARG)
         elif ast.tag == IDENTIFIER:
             pass
         elif ast.tag == MULTI_IDENTIFIER:
