@@ -239,13 +239,19 @@ def parse(code):
         print(root)
         raise RuntimeError(msg)
 
+    # 上个元素是否有后缀
+    hassuffix = False
+
     def finish_node(node):
+        nonlocal hassuffix
         ch = getc()
         suffix = None
+        # ':'和','后可以不用带空白字符
         if ch == ':':
             suffix = ch
+            hassuffix = True
         elif ch == ',':
-            pass
+            hassuffix = True
         elif ch:
             ungetc(ch)
         parent = stack[-1]
@@ -283,12 +289,15 @@ def parse(code):
         node = stack.pop()
         return finish_node(node)
 
-    # listbegin元素前无需空白字符，其他元素前必须有空白字符
-    listbegin = True
-    hasspace = False
-
     # backtick字符串
     backstr = []
+
+    # listbegin元素前无需空白字符，其他元素前必须有空白字符
+    listbegin = True
+
+    hasspace = False
+
+    hassuffix = False
 
     while True:
         """
@@ -306,11 +315,12 @@ def parse(code):
         listend = ch in ')]}'
         comment = ch == ';'
         newline = ch == '\n'
-        if not (listbegin or listend or comment or newline) and not hasspace:
-            # 除了列表开头元素/列表结束字符以及注释和新行，其他元素前必须有空白字符
+        if not (listbegin or listend or hassuffix or comment or newline) and not hasspace:
+            # 除了列表开头元素/列表结束字符/上个元素有后缀以及注释和新行，其他元素前必须有空白字符
             error(f"{ch}: list elements after the first one should start with whitespace")
 
         hasspace = False
+        hassuffix = False
 
         if ch in '([{#': # codelist, listlist, dictlist or hashlist
             listbegin = True
@@ -318,18 +328,18 @@ def parse(code):
             listbegin = False
 
         if ch != '`' and backstr:
-            # 当前不是backtick字符串了，前面有连续的backtick字符串行的话，
+            # 前面处理了连续的backtick字符串，但当前不是backtick字符串了，
             # 合并为一个字符串
-            # 注：遇到注释和空行，多行backtick字符串也不能合并，这对于
-            #     连续两个多行backtick字符串参数很有用，如函数docstring
+            # 注：多行backtick字符串之间如果有注释或空行，则不能合并，
+            #     连续两个多行backtick字符串参数可通过注释或空行分隔，如函数docstring
             #     和返回一个字符串的情况：
             # (fn foo []:
             #   `这是函数foo
             #   `
             #   `本函数没有参数，返回一段神秘字符串
             #
-            #   `这是神秘字符串开始
-            #   `这是神秘字符串结束
+            #   `这是返回的神秘字符串开始
+            #   `这是返回的神秘字符串结束
             # )
             construct(BACKTICK_STRING, ''.join(backstr))
             backstr = []
@@ -499,5 +509,10 @@ if __name__ == '__main__':
     with open(sys.argv[1], encoding='utf-8') as f:
         data = f.read()
     ast = parse(data)
+    print()
+    print(f"========== {sys.argv[1]} ==========")
+    print(data)
+    print("-----------------------")
     print(ast)
+    print()
 

@@ -5,6 +5,8 @@
 {.foo: :world}
 
 (let foo "great value")
-(let bar {(. foo): "is me"})
+(let bar {(. foo):"is me"})
 ; (. foo)可以简写为.foo，所以上述可写为：
-(let bar {.foo: "is me"})
+(let bar {.foo:"is me"})
+
+(let {foo:foo1, bar, key1,key2, @all,} mydict)
