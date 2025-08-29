@@ -8,8 +8,10 @@
 (let b (= bar2 foo (. foo) .foo)) ; b为true
 (let {foo: bar} mymap) ; bar是新绑定的标识符，foo是mymap中的key符号的名字
 (let {foo, bar} mymap) ; foo, bar是两个新绑定的标识符，这是`{foo: foo, bar: bar}`的简写
-(let [a b &c] mylist)  ; a/b/c是新绑定的标识符，c是mylist中除了开头两个元素之外的剩余元素的list
-(let {a, b: b1, c} mymap) ; a/b1/c是新绑定的标识符，b是导入的原始名字，b1是b的重命名
+(let [a, b, &c] mylist)  ; a/b/c是新绑定的标识符，c是mylist中除了开头两个元素之外的剩余元素的list
+(let {a, b: b1, &c} mymap) ; a/b1/c是新绑定的标识符，b是导入的原始名字，b1是b的重命名，c是mymap除开头两个元素之外的剩余元素的map
+(let [a, b, @c] mylist)  ; a/b/c是新绑定的标识符，c是整个list
+(let {a, b: b1, @c} mymap) ; a/b1/c是新绑定的标识符，b是导入的原始名字，b1是b的重命名，c是整个map
 
 (fn myfun []:
   (let a 1)

@@ -14,19 +14,19 @@ BACKTICK_STRING   = 'backtick-string'
 INTERN_STRING     = 'intern-string'
 IDENTIFIER        = 'identifier'
 MULTI_IDENTIFIER  = 'multi-identifier'
-LIST_REMINDER     = 'list-reminder'
+AND_REMINDER      = 'and-reminder'
+AT_WHOLE          = 'at-whole'
 CODE_LIST         = 'code-list'
+HASH_LIST         = 'hash-list'
 LIST_LIST         = 'list-list'
 DICT_LIST         = 'dict-list'
-HASHFN_LIST       = 'hashfn-list'
 
 
-# 各种CODE_LIST
+# 各种特殊的CODE_LIST
 DO_LIST           = 'do-list'
 MATCH_LIST        = 'match-list'
 CASE_LIST         = 'case-list'
 DEFAULT_LIST      = 'default-list'
-COND_LIST         = 'cond-list'
 IF_LIST           = 'if-list'
 ELIF_LIST         = 'elif-list'
 ELSE_LIST         = 'else-list'
@@ -36,8 +36,36 @@ EACH_LIST         = 'each-list'
 FN_LIST           = 'fn-list'
 LET_LIST          = 'let-list'
 VAR_LIST          = 'var-list'
+SET_LIST          = 'set-list'
 IMPORT_LIST       = 'import-list'
 VALUES_LIST       = 'values-list'
+AND_LIST          = 'and-list'
+OR_LIST           = 'or-list'
+NOT_LIST          = 'not-list'
+# (? predicate true-expr false-expr)，类似C语言中的 predicate ? true-expr : false-expr
+QUESTION_LIST     = '?-list'
+
+TRY_LIST          = 'try-list'
+CATCH_LIST        = 'catch-list'
+FINALLY_LIST      = 'finally-list'
+
+# 各种内置的正常CODE_LIST
+DOT_LIST          = '.-list'
+DOTDOT_LIST       = '..-list'
+ADD_LIST          = '+-list'
+SUB_LIST          = '--list'
+MUL_LIST          = '*-list'
+DIV_LIST          = '/-list'
+DIVDIV_LIST       = '//-list'
+MOD_LIST          = 'mod-list'
+EQ_LIST           = '=-list'
+NE_LIST           = '!=-list'
+LT_LIST           = '<-list'
+GT_LIST           = '>-list'
+LE_LIST           = '<=-list'
+GE_LIST           = '>=-list'
+MAP_LIST          = 'map-list'
+LEN_LIST          = 'len-list'
 
 class AstNode:
     def __init__(self, tag, value=None, suffix=None):
@@ -64,8 +92,10 @@ class AstNode:
             value = f'`{self.value}`'
         elif self.tag == INTERN_STRING:
             value = f':{self.value}'
-        elif self.tag == LIST_REMINDER:
+        elif self.tag == AND_REMINDER:
             value = f'&{self.value}'
+        elif self.tag == AT_WHOLE:
+            value = f'@{self.value}'
         elif self.tag == CODE_LIST:
             value = ' '.join(f'{v}' for v in self.value)
             value = f'({value})'
@@ -75,12 +105,24 @@ class AstNode:
         elif self.tag == DICT_LIST:
             value = ' '.join(f'{v}' for v in self.value)
             value = '{' + value + '}'
-        elif self.tag == HASHFN_LIST:
+        elif self.tag == HASH_LIST:
             value = f'#{self.value[0]}'
         if self.suffix:
             return f"{value}{self.suffix}"
         else:
             return f"{value}"
+
+
+class Scope:
+    def __init__(self, parent=None):
+        self.parent = parent
+        self.children = []
+        self.symbols = {}
+        if parent:
+            parent.append(self)
+
+    def append(self, child):
+        self.children.append(child)
 
 
 # ascii字符的printable字符（string.printable)共有100个字符，包括：
@@ -124,7 +166,7 @@ def is_multi_identifier(ch):
 def parse(code):
     i = 0
     prefetch = []
-    root = AstNode(CODE_LIST, [])
+    root = AstNode(CODE_LIST, [AstNode(IDENTIFIER, 'do', ':')])
     stack = [root]
 
     def getc():
@@ -198,7 +240,7 @@ def parse(code):
         elif ch:
             ungetc(ch)
         parent = stack[-1]
-        if parent.tag == HASHFN_LIST:
+        if parent.tag == HASH_LIST:
             parent.append(node)
             parent.suffix = suffix
             node = stack.pop()
@@ -217,7 +259,7 @@ def parse(code):
     def begin_list(t):
         # 1. list不能处理后缀，否则会把':'前缀吃掉
         # 2. list需要处理enstack逻辑
-        if t == HASHFN_LIST and stack[-1].tag == HASHFN_LIST:
+        if t == HASH_LIST and stack[-1].tag == HASH_LIST:
             error("Hashfn does not support hashfn")
         node = AstNode(t, [])
         stack.append(node)
@@ -261,7 +303,7 @@ def parse(code):
 
         hasspace = False
 
-        if ch in '([{#':
+        if ch in '([{#': # codelist, listlist, dictlist or hashlist
             listbegin = True
         else:
             listbegin = False
@@ -336,10 +378,15 @@ def parse(code):
         elif ch == '&':
             s = get_identifier()
             if not s:
-                error("invalid reminder list identifier")
-            construct(LIST_REMINDER, s)
+                error("invalid &-reminder identifier")
+            construct(AND_REMINDER, s)
+        elif ch == '@':
+            s = get_identifier()
+            if not s:
+                error("invalid @-whole identifier")
+            construct(AT_WHOLE, s)
         elif ch == '#':
-            begin_list(HASHFN_LIST)
+            begin_list(HASH_LIST)
         elif ch == '(':
             begin_list(CODE_LIST)
         elif ch == ')':
@@ -388,6 +435,18 @@ def parse(code):
         construct(BACKTICK_STRING, ''.join(backstr))
         backstr = []
     return root
+
+
+def interpret(root):
+    interns = set()
+    g = Scope()
+    scopes = [g]
+
+    def run(ast, scope):
+        pass
+
+    run(root, g)
+    
 
 if __name__ == '__main__':
     import sys
