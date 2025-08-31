@@ -23,6 +23,8 @@ HASH_LIST         = 'hash-list'
 LIST_LIST         = 'list-list'
 DICT_LIST         = 'dict-list'
 
+UPVALUE           = 'upvalue'
+CLOSURE           = 'closure'
 
 # 各种特殊的CODE_LIST
 DO_LIST           = 'do-list'
@@ -114,7 +116,11 @@ class AstNode:
 
 
 class Scope:
-    def __init__(self, parent=None):
+    """
+    静态作用域
+    """ 
+    def __init__(self, ast, parent=None):
+        self.ast = ast
         self.parent = parent
         self.children = []
         self.symbols = {}
@@ -125,10 +131,35 @@ class Scope:
         self.children.append(child)
 
 
+class Frame:
+    """
+    动态作用域
+    """
+    def __init__(self, scope):
+        self.scope = scope
+        self.variables = {}
+
+
 class Value:
     def __init__(self, tag, value=None):
         self.tag = tag
         self.value = value
+
+
+class UpValue(Value):
+    def __init__(self, frame, name):
+        super().__init__(UPVALUE)
+        self.isopen = True
+        self.frame = frame
+        self.name = name
+
+class Closure(Value):
+    def __init__(self, fn):
+        """
+        fn是fn/hashfn的ast
+        """
+        super().__init__(CLOSURE, fn)
+        self.upvalues = {}
 
 
 # ascii字符的printable字符（string.printable)共有100个字符，包括：
@@ -455,8 +486,9 @@ def parse(code):
 
 def interpret(root):
     interns = set()
-    g = Scope()
-    scopes = [g]
+    gs = Scope()
+    gf = Frame(gs)
+    stack = [gf]
     none = Value(NONE)
     true = Value(TRUE)
     false = Value(FALSE)
@@ -464,7 +496,7 @@ def interpret(root):
     def error(msg):
         raise RuntimeError(msg)
 
-    def eval(ast, scope):
+    def eval(ast):
         if ast.tag == NONE:
             return none
         elif ast.tag == TRUE:
@@ -478,7 +510,10 @@ def interpret(root):
         elif ast.tag == VARARG:
             return Value(VARARG)
         elif ast.tag == IDENTIFIER:
-            pass
+            frame = stack[-1]
+            if ast.value in frame.variables:
+                return frame.variables[ast.value]
+            
         elif ast.tag == MULTI_IDENTIFIER:
             pass
         elif ast.tag == AND_REMINDER:
