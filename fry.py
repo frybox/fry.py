@@ -27,17 +27,17 @@ UPVALUE           = 'upvalue'
 CLOSURE           = 'closure'
 
 # 各种特殊的CODE_LIST
-DO_LIST           = 'do-list'
+DO_LIST           = 'do-list'         # new scope
 MATCH_LIST        = 'match-list'
-CASE_LIST         = 'case-list'
-DEFAULT_LIST      = 'default-list'
-IF_LIST           = 'if-list'
-ELIF_LIST         = 'elif-list'
-ELSE_LIST         = 'else-list'
-WHILE_LIST        = 'while-list'
-FOR_LIST          = 'for-list'
-EACH_LIST         = 'each-list'
-FN_LIST           = 'fn-list'
+CASE_LIST         = 'case-list'       # new scope
+DEFAULT_LIST      = 'default-list'    # new scope
+IF_LIST           = 'if-list'         # new scope
+ELIF_LIST         = 'elif-list'       # new scope
+ELSE_LIST         = 'else-list'       # new scope
+WHILE_LIST        = 'while-list'      # new scope
+FOR_LIST          = 'for-list'        # new scope
+EACH_LIST         = 'each-list'       # new scope
+FN_LIST           = 'fn-list'         # new scope
 LET_LIST          = 'let-list'
 VAR_LIST          = 'var-list'
 SET_LIST          = 'set-list'
@@ -49,9 +49,10 @@ NOT_LIST          = 'not-list'
 # (? predicate true-expr false-expr)，类似C语言中的 predicate ? true-expr : false-expr
 QUESTION_LIST     = '?-list'
 
-TRY_LIST          = 'try-list'
-CATCH_LIST        = 'catch-list'
-FINALLY_LIST      = 'finally-list'
+TRY_LIST          = 'try-list'        # new scope
+CATCH_LIST        = 'catch-list'      # new scope
+FINALLY_LIST      = 'finally-list'    # new scope
+TRHOW_LIST        = 'throw-list'
 
 # 各种内置的正常CODE_LIST
 DOT_LIST          = '.-list'
@@ -72,14 +73,119 @@ IS_LIST           = 'is-list'  #同一个对象，地址相同
 MAP_LIST          = 'map-list'
 LEN_LIST          = 'len-list'
 
+
+new_scope_creators = set(
+        'do',
+        'case',
+        'default',
+        'if',
+        'elif',
+        'else',
+        'while',
+        'for',
+        'each',
+        'fn',
+        'try',
+        'catch',
+        'finally',
+        )
+
+class Variable:
+    def __init__(self, name, ast, isupval=False):
+        self.name = name
+        self.ast = ast
+        self.isupvar = isupval
+
+
 class AstNode:
     def __init__(self, tag, value=None, suffix=None):
         self.tag = tag
         self.value = value
         self.suffix = suffix
+        self.parent = None
+        self.boundvars = None    # name set
+        self.upvars = None       # name -> ast
 
     def append(self, value):
         self.value.append(value)
+        value.parent = self
+
+    def isclosure(self):
+        if self.tag == HASH_LIST:
+            return True
+        if self.tag == CODE_LIST:
+            v0 = self.value[0]
+            if v0.tag == IDENTIFIER and v0.value == 'fn':
+                return True
+        return False
+
+    def getclosure(self):
+        node = self
+        while node.parent:
+            node = self.parent
+            if node.isclosure():
+                return node
+
+    def isscope(self):
+        if self.tag == HASH_LIST:
+            return True
+        elif self.tag == CODE_LIST:
+            v0 = self.value[0]
+            if v0.tag == IDENTIFIER and v0.value in new_scope_creators:
+                return True
+        return False
+
+    def getscope(self):
+        node = self
+        while node.parent:
+            node = self.parent
+            if node.isscope():
+                return node
+
+    def addvar(self, name):
+        if self.isscope():
+            if self.boundvars is None:
+                self.boundvars = set()
+            if name in self.boundvars:
+                raise RuntimeError(f"Duplicate definition: {name}")
+            self.boundvars.add(name)
+
+    def getvar(self, name):
+        """在本节点查找变量，包括绑定变量和捕获变量"""
+        if not node.isscope():
+            return None
+        if self.boundvars is None:
+            return None
+        if name in self.boundvars:
+            return Variable(name, self)
+        if not node.isclosure():
+            return None
+        if self.upvars is None:
+            return None
+        if name in self.upvars:
+            return Variable(name, self.upvars[name], True)
+        return None
+
+    def queryvar(self, name):
+        """
+        在本节点及祖先节点查找变量，包括绑定变量和捕获变量。
+        如果是closure之外的变量，保存到closure捕获变量列表。
+        """
+        node = self
+        closure = None
+        while node:
+            var = node.getvar(name)
+            if var:
+                if closure:
+                    var.isupvar = True
+                    if self.upvars is None:
+                        self.upvars = {}
+                    self.upvars[name] = var.ast
+                return var
+            if not closure and node.isclosure():
+                closure = node
+            node = node.parent
+        return None
 
     def __repr__(self):
         if self.tag in (NONE, TRUE, FALSE, VARARG):
@@ -115,28 +221,12 @@ class AstNode:
             return f"{value}"
 
 
-class Scope:
-    """
-    静态作用域
-    """ 
-    def __init__(self, ast, parent=None):
-        self.ast = ast
-        self.parent = parent
-        self.children = []
-        self.symbols = {}
-        if parent:
-            parent.append(self)
-
-    def append(self, child):
-        self.children.append(child)
-
-
 class Frame:
     """
     动态作用域
     """
-    def __init__(self, scope):
-        self.scope = scope
+    def __init__(self, ast):
+        self.ast = ast
         self.variables = {}
 
 
@@ -152,6 +242,7 @@ class UpValue(Value):
         self.isopen = True
         self.frame = frame
         self.name = name
+
 
 class Closure(Value):
     def __init__(self, fn):
@@ -200,7 +291,7 @@ def is_identifier(ch):
 def is_multi_identifier(ch):
     return is_intern(ch) and ch not in  '&@#'
 
-def parse(code):
+def lex(code):
     i = 0
     prefetch = []
     root = AstNode(CODE_LIST, [AstNode(IDENTIFIER, 'do', ':')])
@@ -483,12 +574,43 @@ def parse(code):
         backstr = []
     return root
 
+def parse(ast):
+    if ast.tag in (NONE, TRUE, FALSE):
+        return Value(ast.tag)
+    elif ast.tag in (INTEGER, FLOAT):
+        return Value(ast.tag, ast.value)
+    elif ast.tag in (SINGLE_STRING, DOUBLE_STRING, BACKTICK_STRING, INTERN_STRING):
+        return Value(STRING, ast.value)
+    elif ast.tag == VARARG:
+        return Value(VARARG)
+    elif ast.tag == IDENTIFIER:
+        frame = stack[-1]
+        if ast.value in frame.variables:
+            return frame.variables[ast.value]
+        
+    elif ast.tag == MULTI_IDENTIFIER:
+        pass
+    elif ast.tag == AND_REMINDER:
+        pass
+    elif ast.tag == AT_WHOLE:
+        pass
+    elif ast.tag == CODE_LIST:
+        pass
+    elif ast.tag == HASH_LIST:
+        pass
+    elif ast.tag == LIST_LIST:
+        pass
+    elif ast.tag == DICT_LIST:
+        pass
+    else:
+        error(f"invalid ast: {ast}")
+    
+
 
 def interpret(root):
     interns = set()
-    gs = Scope()
-    gf = Frame(gs)
-    stack = [gf]
+    g = Frame(root)
+    stack = [g]
     none = Value(NONE)
     true = Value(TRUE)
     false = Value(FALSE)
@@ -540,7 +662,7 @@ if __name__ == '__main__':
         sys.exit(1)
     with open(sys.argv[1], encoding='utf-8') as f:
         data = f.read()
-    ast = parse(data)
+    ast = lex(data)
     print()
     print(f"========== {sys.argv[1]} ==========")
     print(data)
