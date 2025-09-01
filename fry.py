@@ -37,6 +37,8 @@ ELSE_LIST         = 'else-list'       # new scope
 WHILE_LIST        = 'while-list'      # new scope
 FOR_LIST          = 'for-list'        # new scope
 EACH_LIST         = 'each-list'       # new scope
+BREAK_LIST        = 'break-list'
+CONTINUE_LIST     = 'continue-list'
 FN_LIST           = 'fn-list'         # new scope
 LET_LIST          = 'let-list'
 VAR_LIST          = 'var-list'
@@ -71,6 +73,7 @@ LE_LIST           = '<=-list'
 GE_LIST           = '>=-list'
 IS_LIST           = 'is-list'  #同一个对象，地址相同
 MAP_LIST          = 'map-list'
+FILTER_LIST       = 'filter-list'
 LEN_LIST          = 'len-list'
 
 
@@ -110,6 +113,22 @@ class AstNode:
         self.value.append(value)
         value.parent = self
 
+    def prev(self):
+        if not self.parent:
+            return None
+        siblings = self.parent.value
+        i = siblings.index(self)
+        if i == 0: return None
+        return siblings[i-1]
+
+    def next(self):
+        if not self.parent:
+            return None
+        siblings = self.parent.value
+        i = siblings.index(self)
+        if i == len(siblings)-1: return None
+        return siblings[i+1]
+
     def isclosure(self):
         if self.tag == HASH_LIST:
             return True
@@ -143,12 +162,14 @@ class AstNode:
                 return node
 
     def addvar(self, name):
-        if self.isscope():
-            if self.boundvars is None:
-                self.boundvars = set()
-            if name in self.boundvars:
-                raise RuntimeError(f"Duplicate definition: {name}")
-            self.boundvars.add(name)
+        scope = self.getscope()
+        if not scope:
+            raise RuntimeError(f"No scope to add {name}")
+        if scope.boundvars is None:
+            scope.boundvars = set()
+        if name in scope.boundvars:
+            raise RuntimeError(f"Duplicate definition: {name}")
+        scope.boundvars.add(name)
 
     def getvar(self, name):
         """在本节点查找变量，包括绑定变量和捕获变量"""
@@ -166,11 +187,12 @@ class AstNode:
             return Variable(name, self.upvars[name], True)
         return None
 
-    def queryvar(self, name):
+    def queryvar(self, name=None):
         """
         在本节点及祖先节点查找变量，包括绑定变量和捕获变量。
         如果是closure之外的变量，保存到closure捕获变量列表。
         """
+        name = name if name else self.value
         node = self
         closure = None
         while node:
@@ -178,9 +200,9 @@ class AstNode:
             if var:
                 if closure:
                     var.isupvar = True
-                    if self.upvars is None:
-                        self.upvars = {}
-                    self.upvars[name] = var.ast
+                    if closure.upvars is None:
+                        closure.upvars = {}
+                    closure.upvars[name] = var.ast
                 return var
             if not closure and node.isclosure():
                 closure = node
@@ -576,41 +598,347 @@ def lex(code):
 
 def parse(ast):
     if ast.tag in (NONE, TRUE, FALSE):
-        return Value(ast.tag)
-    elif ast.tag in (INTEGER, FLOAT):
-        return Value(ast.tag, ast.value)
-    elif ast.tag in (SINGLE_STRING, DOUBLE_STRING, BACKTICK_STRING, INTERN_STRING):
-        return Value(STRING, ast.value)
-    elif ast.tag == VARARG:
-        return Value(VARARG)
-    elif ast.tag == IDENTIFIER:
-        frame = stack[-1]
-        if ast.value in frame.variables:
-            return frame.variables[ast.value]
-        
-    elif ast.tag == MULTI_IDENTIFIER:
         pass
+    elif ast.tag in (INTEGER, FLOAT):
+        pass
+    elif ast.tag in (SINGLE_STRING, DOUBLE_STRING, BACKTICK_STRING, INTERN_STRING):
+        pass
+    elif ast.tag == VARARG:
+        pass
+    elif ast.tag == IDENTIFIER:
+        parse_identifier(ast)
+    elif ast.tag == MULTI_IDENTIFIER:
+        i = ast.value.index['.']
+        name = ast.value[:i]
+        var = ast.queryvar(name)
+        if not var:
+            raise RuntimeError(f"Unknown identifier {name}")
     elif ast.tag == AND_REMINDER:
         pass
     elif ast.tag == AT_WHOLE:
         pass
     elif ast.tag == CODE_LIST:
-        pass
+        parse_code_list(ast)
     elif ast.tag == HASH_LIST:
-        pass
+        parse_hash_list(ast)
     elif ast.tag == LIST_LIST:
-        pass
+        for item in ast.value:
+            parse(item)
     elif ast.tag == DICT_LIST:
-        pass
+        parse_dict_list(ast)
     else:
         error(f"invalid ast: {ast}")
     
+
+def parse_identifier(ast):
+    builtins = set([
+        '.',
+        '..',
+        '+',
+        '-',
+        '*',
+        '/',
+        '//',
+        'mod',
+        '=',
+        '!=',
+        '<',
+        '>',
+        '<=',
+        '>=',
+        'is',
+        'map',
+        'filter',
+        'len',
+    ])
+    if ast.name in builtins:
+        return
+    var = ast.queryvar()
+    if not var:
+        raise RuntimeError(f"Unknown identifier {ast.value}")
+
+
+def parse_hash_list(ast):
+    pass
+
+def parse_dict_list(ast):
+    pass
+
+
+def parse_code_list(ast):
+        if not ast.value:
+            raise RuntimeError("Invalid empty code list")
+        specials = {
+            'do': parse_do,
+            'match': parse_match,
+            'case': parse_case,
+            'default': parse_default,
+            'if': parse_if,
+            'elif': parse_elif,
+            'else': parse_else,
+            'while': parse_while,
+            'for': parse_for,
+            'each': parse_each,
+            'break': parse_break,
+            'continue': parse_continue,
+            'fn': parse_fn,
+            'let': parse_let,
+            'var': parse_var,
+            'set': parse_set,
+            'import': parse_import,
+            'values': parse_values,
+            'and': parse_and,
+            'or': parse_or,
+            'not': parse_not,
+            '?': parse_question,
+            'try': parse_try,
+            'catch': parse_catch,
+            'finally': parse_finally,
+            'throw': parse_throw,
+        }
+
+        def parse_pattern(p, candup=False):
+            pass
+
+        def parse_do():
+            op = ast.value[0]
+            if op.suffix != ':':
+                raise RuntimeError("No ':' after do")
+            ast.special = DO_LIST
+            for item in ast.value[1:]:
+                parse(item)
+        def parse_match():
+            if len(ast.value) < 3:
+                raise RuntimeError("Invalid match expression")
+            ast.special = MATCH_LIST
+            expr = ast.value[1]
+            if expr.suffix != ':':
+                raise RuntimeError("No ':' after match expression")
+            parse(expr)
+            for item in ast.value[2:]:
+                parse(item)
+        def parse_case():
+            if len(ast.value) < 3:
+                raise RuntimeError("Invalid case expression")
+            if ast.parent.special != MATCH_LIST:
+                raise RuntimeError("case expression must be in match expression")
+            ast.special = CASE_LIST
+            pattern = ast.value[1]
+            if pattern.suffix != ':':
+                raise RuntimeError("No ':' after case pattern")
+            if pattern.tag != CODE_LIST:
+                parse_pattern(pattern)
+            elif not pattern.value:
+                raise RuntimeError("Invalid case pattern")
+            elif pattern.value[0].tag != IDENTIFIER:
+                raise RuntimeError("Invalid case pattern")
+            elif pattern.value[0].value == 'values':
+                for p in pattern.values[1:]:
+                    parse_pattern(p)
+            elif pattern.value[0].value == 'and':
+                if len(pattern.value) < 2:
+                    raise RuntimeError("Invalid case pattern")
+                parse_pattern(pattern.value[1])
+                for item in pattern.value[2:]:
+                    parse(item)
+            elif pattern.value[0].value == 'or':
+                if len(pattern.value) < 2:
+                    raise RuntimeError("Invalid case pattern")
+                for p in pattern.values[1:]:
+                    parse_pattern(p)
+            else:
+                raise RuntimeError("Invalid case pattern")
+            for item in ast.value[2:]:
+                parse(item)
+        def parse_default():
+            if len(ast.value) < 2:
+                raise RuntimeError("Invalid default expression")
+            if ast.parent.special != MATCH_LIST:
+                raise RuntimeError("default expression must be in match expression")
+            if ast.value[0].suffix != ':':
+                raise RuntimeError("No ':' after default")
+            ast.special = DEFAULT_LIST
+            for item in ast.value[1:]:
+                parse(item)
+        def parse_if():
+            if len(ast.value) < 3:
+                raise RuntimeError("Invalid if expression")
+            ast.special = IF_LIST
+            pred = ast.value[1]
+            if pred.suffix != ':':
+                raise RuntimeError("No ':' after if predication")
+            for item in ast.value[1:]:
+                parse(item)
+        def parse_elif():
+            if len(ast.value) < 3:
+                raise RuntimeError("Invalid elif expression")
+            if ast.prev().special not in (IF_LIST, ELIF_LIST):
+                raise RuntimeError("No previous if/elif expression")
+            ast.special = ELIF_LIST
+            pred = ast.value[1]
+            if pred.suffix != ':':
+                raise RuntimeError("No ':' after elif predication")
+            for item in ast.value[1:]:
+                parse(item)
+        def parse_else():
+            if len(ast.value) < 2:
+                raise RuntimeError("Invalid else expression")
+            if ast.value[0].suffix != ':':
+                raise RuntimeError("No ':' after else")
+            if ast.prev().special not in (IF_LIST, ELIF_LIST, WHILE_LIST, FOR_LIST, EACH_LIST):
+                raise RuntimeError("No previous if/elif/while/for/each expression")
+            ast.special = ELSE_LIST
+            for item in ast.value[1:]:
+                parse(item)
+        def parse_while():
+            if len(ast.value) < 3:
+                raise RuntimeError("Invalid while expression")
+            ast.special = WHILE_LIST
+            pred = ast.value[1]
+            if pred.suffix != ':':
+                raise RuntimeError("No ':' after while predication")
+            for item in ast.value[1:]:
+                parse(item)
+        def parse_for():
+            if len(ast.value) < 3:
+                raise RuntimeError("Invalid for expression")
+            ast.special = FOR_LIST
+            pred = ast.value[1]
+            if pred.suffix != ':':
+                raise RuntimeError("No ':' after for parameter list")
+            if pred.tag != LIST_LIST:
+                raise RuntimeError("Invalid for parameter list")
+            if len(pred.value) not in (3, 4):
+                raise RuntimeError("Invalid for parameter list")
+            if pred.value[0].tag != IDENTIFIER:
+                raise RuntimeError("Invalid for parameter")
+            pred.addvar(pred.value[0].value)
+            for item in pred.value[1:]:
+                parse(item)
+            for item in ast.value[2:]:
+                parse(item)
+        def parse_each():
+            if len(ast.value) < 3:
+                raise RuntimeError("Invalid each expression")
+            ast.special = EACH_LIST
+            pred = ast.value[1]
+            if pred.suffix != ':':
+                raise RuntimeError("No ':' after each parameter list")
+            if pred.tag != LIST_LIST:
+                raise RuntimeError("Invalid each parameter list")
+            if len(pred.value) < 2:
+                raise RuntimeError("Invalid each parameter list")
+            for item in pred.value[:-1]:
+                parse_pattern(item)
+            parse(pred.value[-1])
+            for item in ast.value[2:]:
+                parse(item)
+        def parse_break():
+            ast.special = BREAK_LIST
+        def parse_continue():
+            ast.special = CONTINUE_LIST
+        def parse_fn():
+            if len(ast.value) < 3:
+                raise RuntimeError("Invalid fn expression")
+            ast.special = FN_LIST
+            ai = 1
+            if ast.value[1].tag == IDENTIFIER:
+                ast.addvar(ast.value[1].value)
+                ai = 2
+            arglist = ast.value[ai]
+            if arglist.suffix != ':':
+                raise RuntimeError("No ':' after fn parameter list")
+            if arglist.tag != LIST_LIST:
+                raise RuntimeError("Invalid fn parameter list")
+            for arg in arglist.value:
+                if arg.tag != IDENTIFIER:
+                    raise RuntimeError("Invalid fn argument")
+                arg.addvar(arg.value)
+            for item in ast.value[ai+1:]:
+                parse(item)
+        def parse_let():
+            if len(ast.value) < 3:
+                raise RuntimeError("Invalid let expression")
+            ast.special = LET_LIST
+            for item in ast.value[1:-1]:
+                parse_pattern(item)
+            parse(ast.value[-1])
+        def parse_var():
+            if len(ast.value) < 3:
+                raise RuntimeError("Invalid var expression")
+            ast.special = VAR_LIST
+            for item in ast.value[1:-1]:
+                parse_pattern(item)
+            parse(ast.value[-1])
+        def parse_set():
+            if len(ast.value) != 3:
+                raise RuntimeError("Invalid set expression")
+            ast.special = SET_LIST
+            for item in ast.value[1:]:
+                parse(item)
+        def parse_import():
+            if len(ast.value) < 3:
+                raise RuntimeError("Invalid import expression")
+            ast.special = IMPORT_LIST
+            for item in ast.value[1:-1]:
+                parse_pattern(item)
+            parse(ast.value[-1])
+        def parse_values():
+            if len(ast.value) < 2:
+                raise RuntimeError("Invalid values expression")
+            ast.special = VALUES_LIST
+            for item in ast.value[1:]:
+                parse(item)
+        def parse_and():
+            if len(ast.value) < 3:
+                raise RuntimeError("Invalid and expression")
+            ast.special = AND_LIST
+            for item in ast.value[1:]:
+                parse(item)
+        def parse_or():
+            if len(ast.value) < 3:
+                raise RuntimeError("Invalid or expression")
+            ast.special = AND_LIST
+            for item in ast.value[1:]:
+                parse(item)
+        def parse_not():
+            if len(ast.value) != 2:
+                raise RuntimeError("Invalid not expression")
+            ast.special = NOT_LIST
+            parse(ast.value[1])
+        def parse_question():
+            if len(ast.value) != 4:
+                raise RuntimeError("Invalid ? expression")
+            ast.special = QUESTION_LIST
+            for item in ast.value[1:]:
+                parse(item)
+        def parse_try():
+            raise RuntimeError("not support try")
+        def parse_catch():
+            raise RuntimeError("not support catch")
+        def parse_finally():
+            raise RuntimeError("not support finally")
+        def parse_throw():
+            raise RuntimeError("not support throw")
+
+        op = ast.value[0]
+        if op.tag == IDENTIFIER and op.value in specials:
+                specials[op.value](ast)
+        else:
+            for item in ast.value:
+                parse(item)
+
+
+
+
+                    
 
 
 def interpret(root):
     interns = set()
     g = Frame(root)
     stack = [g]
+    openupvals = {}
     none = Value(NONE)
     true = Value(TRUE)
     false = Value(FALSE)
