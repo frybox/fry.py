@@ -129,7 +129,7 @@ class AstNode:
         if i == len(siblings)-1: return None
         return siblings[i+1]
 
-    def isclosure(self):
+    def isfn(self):
         if self.tag == HASH_LIST:
             return True
         if self.tag == CODE_LIST:
@@ -138,12 +138,20 @@ class AstNode:
                 return True
         return False
 
-    def getclosure(self):
+    def getfn(self):
         node = self
         while node.parent:
             node = self.parent
-            if node.isclosure():
+            if node.isfn():
                 return node
+
+    def gethashfn(self):
+        fn = self.getfn()
+        while fn:
+            if fn.tag == HASH_LIST:
+                return fn
+            fn = fn.getfn()
+        return None
 
     def isscope(self):
         if self.tag == HASH_LIST:
@@ -161,15 +169,21 @@ class AstNode:
             if node.isscope():
                 return node
 
-    def addvar(self, name):
+    def addvar(self, name, candup=False):
+        scope = self
+        if not scope.isscope():
+            raise RuntimeError(f"Not scope to add {name}")
+        if scope.boundvars is None:
+            scope.boundvars = set()
+        if not candup and name in scope.boundvars:
+            raise RuntimeError(f"Duplicate definition: {name}")
+        scope.boundvars.add(name)
+
+    def addvartoscope(self, name, candup=False):
         scope = self.getscope()
         if not scope:
             raise RuntimeError(f"No scope to add {name}")
-        if scope.boundvars is None:
-            scope.boundvars = set()
-        if name in scope.boundvars:
-            raise RuntimeError(f"Duplicate definition: {name}")
-        scope.boundvars.add(name)
+        scope.addvar(name, candup)
 
     def getvar(self, name):
         """在本节点查找变量，包括绑定变量和捕获变量"""
@@ -179,7 +193,7 @@ class AstNode:
             return None
         if name in self.boundvars:
             return Variable(name, self)
-        if not node.isclosure():
+        if not node.isfn():
             return None
         if self.upvars is None:
             return None
@@ -204,7 +218,7 @@ class AstNode:
                         closure.upvars = {}
                     closure.upvars[name] = var.ast
                 return var
-            if not closure and node.isclosure():
+            if not closure and node.isfn():
                 closure = node
             node = node.parent
         return None
@@ -306,6 +320,9 @@ def is_visible_utf8(ch):
 
 def is_intern(ch):
     return is_visible_utf8(ch) and ch not in ':;,\'"`()[]{}'
+
+def is_strict_identifier(ch):
+    return ch.isalnum() or ch == '_' or ch == '-'
 
 def is_identifier(ch):
     return is_intern(ch) and ch not in '&@#.'
@@ -584,17 +601,48 @@ def lex(code):
             elif s[0] == '.':
                 s = s[1:]
                 if '.' in s:
+                    ss = s.split('.')
+                    ss[0] = '$1' if ss[0] == '$' else ss[0]
+                    s = '.'.join(ss)
                     construct(CODE_LIST, [AstNode(IDENTIFIER, '.'), AstNode(MULTI_IDENTIFIER, s)])
                 else:
+                    s = '$1' if s == '$' else s
                     construct(CODE_LIST, [AstNode(IDENTIFIER, '.'), AstNode(IDENTIFIER, s)])
             elif '.' in s:
+                ss = s.split('.')
+                ss[0] = '$1' if ss[0] == '$' else ss[0]
+                s = '.'.join(ss)
                 construct(MULTI_IDENTIFIER, s)
             else:
+                s = '$1' if s == '$' else s
                 construct(IDENTIFIER, s)
     if backstr:
         construct(BACKTICK_STRING, ''.join(backstr))
         backstr = []
     return root
+
+
+builtins = set([
+    '.',
+    '..',
+    '+',
+    '-',
+    '*',
+    '/',
+    '//',
+    'mod',
+    '=',
+    '!=',
+    '<',
+    '>',
+    '<=',
+    '>=',
+    'is',
+    'map',
+    'filter',
+    'len',
+])
+
 
 def parse(ast):
     if ast.tag in (NONE, TRUE, FALSE):
@@ -604,66 +652,193 @@ def parse(ast):
     elif ast.tag in (SINGLE_STRING, DOUBLE_STRING, BACKTICK_STRING, INTERN_STRING):
         pass
     elif ast.tag == VARARG:
-        pass
+        scope = ast.getscope()
+        while scope:
+            if scope.getvar('...'):
+                return
+            if scope.isfn():
+                raise RuntimeError("vararg ... is not declared in the current function")
+            scope = scope.getscope()
+        else: raise RuntimeError("vararg ... is not declared in the current function")
     elif ast.tag == IDENTIFIER:
-        parse_identifier(ast)
+        if ast.value in builtins:
+            return
+        if len(ast.value) == 2 and ast.value[0] == '$' and ast.value[1].isdigit():
+            n = int(ast.value[1])
+            hash = ast.gethashfn()
+            for i in range(1, n+1):
+                arg = f'${i}'
+                hash.addvar(arg, True)
+        var = ast.queryvar()
+        if not var:
+            raise RuntimeError(f"Unknown identifier {ast.value}")
     elif ast.tag == MULTI_IDENTIFIER:
         i = ast.value.index['.']
         name = ast.value[:i]
         var = ast.queryvar(name)
         if not var:
             raise RuntimeError(f"Unknown identifier {name}")
-    elif ast.tag == AND_REMINDER:
-        pass
-    elif ast.tag == AT_WHOLE:
-        pass
+    elif ast.tag in (AND_REMINDER, AT_WHOLE):
+        raise RuntimeError("Invalid &reminder or @whole")
     elif ast.tag == CODE_LIST:
         parse_code_list(ast)
     elif ast.tag == HASH_LIST:
-        parse_hash_list(ast)
+        if len(ast.value) != 1:
+            raise RuntimeError("Invalid hash function")
+        parse(ast.value[0])
     elif ast.tag == LIST_LIST:
         for item in ast.value:
             parse(item)
     elif ast.tag == DICT_LIST:
-        parse_dict_list(ast)
+        pairs = []
+        key = None
+        for item in ast.value:
+            if not key:
+                if item.suffix == ':':
+                    if item.tag == IDENTIFIER:
+                        item.tag = INTERN_STRING
+                    parse(item)
+                    key = item
+                    continue
+                else:
+                    if item.tag == IDENTIFIER:
+                        key = AstNode(INTERN_STRING, item.value)
+                    elif (item.tag == CODE_LIST and
+                          len(item.value) == 2 and
+                          item.value[0].tag == IDENTIFIER and
+                          item.value[0].value == '.' and
+                          item.value[1].tag == IDENTIFIER):
+                        key = AstNode(INTERN_STRING, item.value[1].value)
+                    else:
+                        raise RuntimeError("Invalid dict expression")
+            parse(item)
+            pairs.append((key, item))
+            key = None
+        ast.value = pairs
     else:
         error(f"invalid ast: {ast}")
     
 
-def parse_identifier(ast):
-    builtins = set([
-        '.',
-        '..',
-        '+',
-        '-',
-        '*',
-        '/',
-        '//',
-        'mod',
-        '=',
-        '!=',
-        '<',
-        '>',
-        '<=',
-        '>=',
-        'is',
-        'map',
-        'filter',
-        'len',
-    ])
-    if ast.name in builtins:
-        return
-    var = ast.queryvar()
-    if not var:
-        raise RuntimeError(f"Unknown identifier {ast.value}")
+def parse_destructure(ast):
+    if ast.tag == IDENTIFIER:
+        ast.addvartoscope(ast.value)
+    elif ast.tag == VARARG:
+        ast.addvartoscope('...')
+    elif ast.tag == LIST_LIST:
+        for item in ast.value:
+            if not item.suffix:
+                raise RuntimeError(f"Invalid list item suffix '{item.suffix}'")
+            elif item.tag in (IDENTIFIER, AND_REMINDER, AT_WHOLE):
+                ast.addvartoscope(ast.value)
+            elif item.tag in (LIST_LIST, DICT_LIST):
+                parse_destructure(item)
+            else:
+                raise RuntimeError("invalid list destructure")
+    elif ast.tag == DICT_LIST:
+        pairs = []
+        key = None
+        for item in ast.value:
+            if not key:
+                if item.suffix == ':':
+                    if item.tag == IDENTIFIER:
+                        item.tag = INTERN_STRING
+                    parse(item)
+                    key = item
+                elif item.tag == IDENTIFIER:
+                    k = AstNode(INTERN_STRING, item.value)
+                    ast.addvartoscope(item.value)
+                    pairs.append((k, item))
+                elif item.tag == AND_REMINDER:
+                    k = AstNode(INTERN_STRING, '&')
+                    ast.addvartoscope(item.value)
+                    pairs.append((k, item))
+                elif item.tag == AT_WHOLE:
+                    k = AstNode(INTERN_STRING, '@')
+                    ast.addvartoscope(item.value)
+                    pairs.append((k, item))
+                else:
+                    raise RuntimeError("invalid dict destructure")
+            elif item.tag in (IDENTIFIER, LIST_LIST, DICT_LIST):
+                parse_destructure(item)
+                pairs.append((key, item))
+                key = None
+            else:
+                raise RuntimeError(f"Invalid dict value {item}")
+        ast.value = pairs
+    else:
+        error(f"invalid destructure: {ast}")
 
-
-def parse_hash_list(ast):
-    pass
-
-def parse_dict_list(ast):
-    pass
-
+def parse_pattern(ast):
+    if ast.tag in (NONE, TRUE, FALSE):
+        pass
+    elif ast.tag in (INTEGER, FLOAT):
+        pass
+    elif ast.tag in (SINGLE_STRING, DOUBLE_STRING, BACKTICK_STRING, INTERN_STRING):
+        pass
+    elif ast.tag == VARARG:
+        ast.addvartoscope('...')
+    elif ast.tag == IDENTIFIER:
+        ast.addvartoscope(ast.value)
+    elif ast.tag == CODE_LIST:
+        parse_code_list(ast)
+    elif ast.tag == LIST_LIST:
+        for item in ast.value:
+            if not item.suffix:
+                raise RuntimeError(f"Invalid list item suffix '{item.suffix}'")
+            elif item.tag in (IDENTIFIER, AND_REMINDER, AT_WHOLE):
+                ast.addvartoscope(ast.value)
+            elif item.tag in (NONE, TRUE, FALSE, INTEGER, FLOAT,
+                              SINGLE_STRING, DOUBLE_STRING, BACKTICK_STRING,
+                              INTERN_STRING):
+                pass
+            elif ast.tag == CODE_LIST:
+                parse_code_list(ast)
+            elif item.tag in (LIST_LIST, DICT_LIST):
+                parse_pattern(item)
+            else:
+                raise RuntimeError("invalid list destructure")
+    elif ast.tag == DICT_LIST:
+        pairs = []
+        key = None
+        for item in ast.value:
+            if not key:
+                if item.suffix == ':':
+                    if item.tag == IDENTIFIER:
+                        item.tag = INTERN_STRING
+                    parse(item)
+                    key = item
+                elif item.tag == IDENTIFIER:
+                    k = AstNode(INTERN_STRING, item.value)
+                    ast.addvartoscope(item.value)
+                    pairs.append((k, item))
+                elif item.tag == AND_REMINDER:
+                    k = AstNode(INTERN_STRING, '&')
+                    ast.addvartoscope(item.value)
+                    pairs.append((k, item))
+                elif item.tag == AT_WHOLE:
+                    k = AstNode(INTERN_STRING, '@')
+                    ast.addvartoscope(item.value)
+                    pairs.append((k, item))
+                elif (item.tag == CODE_LIST and
+                      len(item.value) == 2 and
+                      item.value[0].tag == IDENTIFIER and
+                      item.value[0].value == '.' and
+                      item.value[1].tag == IDENTIFIER):
+                    parse(item)
+                    k = AstNode(INTERN_STRING, item.value[1].value)
+                    pairs.append((k, item))
+                else:
+                    raise RuntimeError("invalid dict destructure")
+            elif item.tag not in (VARARG, AND_REMINDER, AT_WHOLE, HASH_LIST):
+                parse_pattern(item)
+                pairs.append((key, item))
+                key = None
+            else:
+                raise RuntimeError(f"Invalid dict value {item}")
+        ast.value = pairs
+    else:
+        error(f"invalid ast: {ast}")
+    
 
 def parse_code_list(ast):
         if not ast.value:
@@ -696,9 +871,6 @@ def parse_code_list(ast):
             'finally': parse_finally,
             'throw': parse_throw,
         }
-
-        def parse_pattern(p, candup=False):
-            pass
 
         def parse_do():
             op = ast.value[0]
@@ -812,7 +984,7 @@ def parse_code_list(ast):
                 raise RuntimeError("Invalid for parameter list")
             if pred.value[0].tag != IDENTIFIER:
                 raise RuntimeError("Invalid for parameter")
-            pred.addvar(pred.value[0].value)
+            pred.addvartoscope(pred.value[0].value)
             for item in pred.value[1:]:
                 parse(item)
             for item in ast.value[2:]:
@@ -829,7 +1001,7 @@ def parse_code_list(ast):
             if len(pred.value) < 2:
                 raise RuntimeError("Invalid each parameter list")
             for item in pred.value[:-1]:
-                parse_pattern(item)
+                parse_destructure(item)
             parse(pred.value[-1])
             for item in ast.value[2:]:
                 parse(item)
@@ -843,7 +1015,7 @@ def parse_code_list(ast):
             ast.special = FN_LIST
             ai = 1
             if ast.value[1].tag == IDENTIFIER:
-                ast.addvar(ast.value[1].value)
+                ast.addvartoscope(ast.value[1].value)
                 ai = 2
             arglist = ast.value[ai]
             if arglist.suffix != ':':
@@ -853,7 +1025,7 @@ def parse_code_list(ast):
             for arg in arglist.value:
                 if arg.tag != IDENTIFIER:
                     raise RuntimeError("Invalid fn argument")
-                arg.addvar(arg.value)
+                arg.addvartoscope(arg.value)
             for item in ast.value[ai+1:]:
                 parse(item)
         def parse_let():
@@ -861,14 +1033,14 @@ def parse_code_list(ast):
                 raise RuntimeError("Invalid let expression")
             ast.special = LET_LIST
             for item in ast.value[1:-1]:
-                parse_pattern(item)
+                parse_destructure(item)
             parse(ast.value[-1])
         def parse_var():
             if len(ast.value) < 3:
                 raise RuntimeError("Invalid var expression")
             ast.special = VAR_LIST
             for item in ast.value[1:-1]:
-                parse_pattern(item)
+                parse_destructure(item)
             parse(ast.value[-1])
         def parse_set():
             if len(ast.value) != 3:
@@ -881,7 +1053,7 @@ def parse_code_list(ast):
                 raise RuntimeError("Invalid import expression")
             ast.special = IMPORT_LIST
             for item in ast.value[1:-1]:
-                parse_pattern(item)
+                parse_destructure(item)
             parse(ast.value[-1])
         def parse_values():
             if len(ast.value) < 2:
@@ -927,11 +1099,6 @@ def parse_code_list(ast):
         else:
             for item in ast.value:
                 parse(item)
-
-
-
-
-                    
 
 
 def interpret(root):
