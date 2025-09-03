@@ -15,7 +15,7 @@
   (print :end))
 
 ; 上述定义等价于如下：
-(let myfun
+(let myfun1
      (fn [arg1 arg2]:
        (print :hello :world)
        (print arg1 arg2)
@@ -27,7 +27,7 @@
   (let foo [...])
   (print (len foo)))
 
-(fn foo [a1 a2]:
+(fn foo1 [a1 a2]:
   `This is a great function.
   `
   `There are two great arguments: a1 and a2
@@ -35,6 +35,22 @@
   `a2 - great argument two
   `you can use this function anywhere
   (print 'hello' " " :world))
+
+
+(fn _extract_text_from_plain_text [file_content]: 1)
+(fn _extract_text_from_json [file_content]: 1)
+(fn _extract_text_from_yaml [file_content]: 1)
+(fn _extract_text_from_pdf [file_content]: 1)
+(fn _extract_text_from_doc [file_content]: 1)
+(fn _extract_text_from_docx [file_content]: 1)
+(fn _extract_text_from_csv [file_content]: 1)
+(fn _extract_text_from_excel [file_content]: 1)
+(fn _extract_text_from_ppt [file_content]: 1)
+(fn _extract_text_from_pptx [file_content]: 1)
+(fn _extract_text_from_epub [file_content]: 1)
+(fn _extract_text_from_eml [file_content]: 1)
+(fn _extract_text_from_msg [file_content]: 1)
+(fn UnsupportedFileTypeError []: 1)
 
 (fn _extract_text_by_file_extension [file_content, file_extension]:
   `Extract text from a file based on its file extension.
@@ -66,15 +82,16 @@
     (case ".msg":
       (_extract_text_from_msg file_content))
     (default:
-      (raise (UnsupportedFileTypeError (.. "Unsupported Extension Type: " file_extension))))))
+      (print (UnsupportedFileTypeError (.. "Unsupported Extension Type: " file_extension))))))
 
-(let foo (fn []: (print :hello :world)))
+(let foo2 (fn []: (print :hello :world)))
 
 (let bar #(print :hello :world))
 
+(let mymap {a: 1, b: 2, c:3})
 (map #(print $2 $1 $1) mymap)
 
-(map #(-- $1) [2 3 4]) ; [1 2 3]
+(map #(-- $) [2 3 4]) ; [1 2 3]
 
 `This is the return value.
 `返回的是一个字符串。

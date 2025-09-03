@@ -2,6 +2,7 @@
 (let mylist [1 2 3 4 5])
 (let mymap {mylist, key1: 10, key2: "hello"})
 (var foo 0)
+(var bar 1)
 (if (<= 0 foo):
   (print :hello :ok))
 
@@ -25,7 +26,8 @@
   (print 'good end'))
 
 ; for range
-(for [i begin end step?]:
+(let begin end step (values 1 10 2))
+(for [i begin end step]:
   (print i))
 
 ; each

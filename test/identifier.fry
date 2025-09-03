@@ -5,26 +5,28 @@
 (let foo3 :foo3)
 (let bar1 (. foo :foo1 :foo2 foo3)) ;bar1也是"real value"，.是解构运算符
 (let bar2 (. foo))
-(let b (= bar2 foo (. foo) .foo)) ; b为true
-(let {foo: bar} mymap) ; bar是新绑定的标识符，foo是mymap中的key符号的名字
-(let {foo, bar} mymap) ; foo, bar是两个新绑定的标识符，这是`{foo: foo, bar: bar}`的简写
+(let bb (= bar2 foo (. foo) .foo)) ; bb为true
+(let mylist [1, 2, 3])
+(let mymap {a:1, b:2, c:3})
+(let {foo: foo1} mymap) ; bar是新绑定的标识符，foo是mymap中的key符号的名字
+(let {foo2, bar3} mymap) ; foo, bar是两个新绑定的标识符，这是`{foo: foo, bar: bar}`的简写
 (let [a, b, &c] mylist)  ; a/b/c是新绑定的标识符，c是mylist中除了开头两个元素之外的剩余元素的list
-(let {a, b: b1, &c} mymap) ; a/b1/c是新绑定的标识符，b是导入的原始名字，b1是b的重命名，c是mymap除开头两个元素之外的剩余元素的map
-(let [a, b, @c] mylist)  ; a/b/c是新绑定的标识符，c是整个list
-(let {a, b: b1, @c} mymap) ; a/b1/c是新绑定的标识符，b是导入的原始名字，b1是b的重命名，c是整个map
+(let {a1, b: b1, &c1} mymap) ; a/b1/c是新绑定的标识符，b是导入的原始名字，b1是b的重命名，c是mymap除开头两个元素之外的剩余元素的map
+(let [a2, b2, @c2] mylist)  ; a/b/c是新绑定的标识符，c是整个list
+(let {a3 b: b3, @c3} mymap) ; a/b1/c是新绑定的标识符，b是导入的原始名字，b1是b的重命名，c是整个map
 
 (fn myfun []:
   (let a 1)
   (let b 2)
   (values a b 3 4))
-(let a b c _ (myfun)) ; 由于不关注第四个参数，所以使用_代替，_开头的变量只是占位符。
+(let a4 b4 c4 _ (myfun)) ; 由于不关注第四个参数，所以使用_代替，_开头的变量只是占位符。
 (print a b c) ; 输出1 2 3
 (fn myfun2 [a b c d]:
   (print a b c d))
 (myfun2 (myfun)) ; myfun返回四个值，可以直接扩展为myfun2的四个参数
 
-(let foo :foo)
-(let bar :bar)
+(let foo4 :foo)
+(let bar4 :bar)
 (values foo bar)
-(let a b (values foo bar)) ; ok
+(let a5 b5 (values foo bar)) ; ok
 (let ab (values foo bar))  ; error

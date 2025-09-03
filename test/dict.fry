@@ -1,12 +1,13 @@
 ; 符号key
 {foo: :bar}
-; 变量标识符key
-(let foo :hello)
-{.foo: :world}
+;; 变量标识符key
+(let foo {hello: :world})
+{.foo.hello: :world}
 
-(let foo "great value")
+(let foo1 "great value")
 (let bar {(. foo):"is me"})
 ; (. foo)可以简写为.foo，所以上述可写为：
-(let bar {.foo:"is me"})
+(let bar1 {.foo:"is me"})
 
-(let {foo:foo1, bar, key1,key2, @all,} mydict)
+(let mydict {foo: 1, bar2: 2, key1: 3, key2:4, key3:5})
+(let {foo:foo2, bar2, key1,key2, @all,} mydict)
