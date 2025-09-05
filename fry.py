@@ -35,6 +35,8 @@ CLOSURE           = 'closure'
 DO_LIST           = 'do-list'         # new scope
 MATCH_LIST        = 'match-list'
 CASE_LIST         = 'case-list'       # new scope
+CASEIF_LIST       = 'caseif-list'     # new scope
+CASES_LIST        = 'cases-list'      # new scope
 DEFAULT_LIST      = 'default-list'    # new scope
 IF_LIST           = 'if-list'         # new scope
 ELIF_LIST         = 'elif-list'       # new scope
@@ -80,11 +82,14 @@ IS_LIST           = 'is-list'  #同一个对象，地址相同
 MAP_LIST          = 'map-list'
 FILTER_LIST       = 'filter-list'
 LEN_LIST          = 'len-list'
+PRINT_LIST        = 'print-list'
 
 
 new_scope_creators = set([
         'do',
         'case',
+        'caseif',
+        'cases',
         'default',
         'if',
         'elif',
@@ -715,10 +720,9 @@ def parse(ast):
                 raise RuntimeError(f"Invalid list item suffix '{item.suffix}'")
             parse(item)
     elif ast.tag == DICT_LIST:
-        dlist = ast.value
-        ast.value = []
+        pairs = []
         key = None
-        for item in dlist:
+        for item in ast.value:
             if not key:
                 if item.suffix == ':':
                     if item.tag == IDENTIFIER:
@@ -739,8 +743,11 @@ def parse(ast):
                     else:
                         raise RuntimeError(f"Invalid dict expression: {item}")
             parse(item)
-            ast.append(mkpair(key, item))
+            pairs.append(mkpair(key, item))
             key = None
+        ast.value = []
+        for pair in pairs:
+            ast.append(pair)
     else:
         error(f"invalid ast: {ast}")
 
@@ -761,10 +768,9 @@ def parse_destructure(ast):
             else:
                 raise RuntimeError("invalid list destructure")
     elif ast.tag == DICT_LIST:
-        dlist = ast.value
-        ast.value = []
+        pairs = [] 
         key = None
-        for item in dlist:
+        for item in ast.value:
             if not key:
                 if item.suffix == ':':
                     if item.tag == IDENTIFIER:
@@ -775,23 +781,26 @@ def parse_destructure(ast):
                 elif item.tag == IDENTIFIER:
                     k = AstNode(INTERN_STRING, item.value)
                     item.addvartoscope(item.value)
-                    ast.append(mkpair(k, item))
+                    pairs.append(mkpair(k, item))
                 elif item.tag == AND_REMINDER:
                     k = AstNode(INTERN_STRING, '&')
                     item.addvartoscope(item.value)
-                    ast.append(mkpair(k, item))
+                    pairs.append(mkpair(k, item))
                 elif item.tag == AT_WHOLE:
                     k = AstNode(INTERN_STRING, '@')
                     item.addvartoscope(item.value)
-                    ast.append(mkpair(k, item))
+                    pairs.append(mkpair(k, item))
                 else:
                     raise RuntimeError("invalid dict destructure")
             elif item.tag in (IDENTIFIER, LIST_LIST, DICT_LIST):
                 parse_destructure(item)
-                ast.append(mkpair(key, item))
+                pairs.append(mkpair(key, item))
                 key = None
             else:
                 raise RuntimeError(f"Invalid dict value {item}")
+        ast.value = []
+        for pair in pairs:
+            ast.append(pair)
     else:
         error(f"invalid destructure: {ast}")
 
@@ -829,8 +838,7 @@ def parse_pattern(ast):
             else:
                 raise RuntimeError("invalid list destructure")
     elif ast.tag == DICT_LIST:
-        dlist = ast.value
-        ast.value = []
+        pairs = []
         key = None
         for item in ast.value:
             if not key:
@@ -843,15 +851,15 @@ def parse_pattern(ast):
                 elif item.tag == IDENTIFIER:
                     k = AstNode(INTERN_STRING, item.value)
                     item.addvartoscope(item.value)
-                    ast.append(mkpair(k, item))
+                    pairs.append(mkpair(k, item))
                 elif item.tag == AND_REMINDER:
                     k = AstNode(INTERN_STRING, '&')
                     item.addvartoscope(item.value)
-                    ast.append(mkpair(k, item))
+                    pairs.append(mkpair(k, item))
                 elif item.tag == AT_WHOLE:
                     k = AstNode(INTERN_STRING, '@')
                     item.addvartoscope(item.value)
-                    ast.append(mkpair(k, item))
+                    pairs.append(mkpair(k, item))
                 elif (item.tag == CODE_LIST and
                       len(item.value) == 2 and
                       item.value[0].tag == IDENTIFIER and
@@ -859,15 +867,18 @@ def parse_pattern(ast):
                       item.value[1].tag == IDENTIFIER):
                     parse(item)
                     k = AstNode(INTERN_STRING, item.value[1].value)
-                    ast.append(mkpair(k, item))
+                    pairs.append(mkpair(k, item))
                 else:
                     raise RuntimeError("invalid dict destructure")
             elif item.tag not in (VARARG, AND_REMINDER, AT_WHOLE, HASH_LIST):
                 parse_pattern(item)
-                ast.append(mkpair(key, item))
+                pairs.append(mkpair(key, item))
                 key = None
             else:
                 raise RuntimeError(f"Invalid dict value {item}")
+        ast.value = []
+        for pair in pairs:
+            ast.append(pair)
     else:
         error(f"invalid ast: {ast}")
     
