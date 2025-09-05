@@ -12,11 +12,18 @@
 (fn myfun [arg1 arg2]:
   (print :hello :world)
   (print arg1 arg2)
-  (print :end))
+  (fn myfun2 []:
+    (print arg1 arg2)
+    (fn myfun3 []:
+      (print foo))
+    myfun3)
+  (print :end)
+  myfun2)
 
 ; 上述定义等价于如下：
 (let myfun1
      (fn [arg1 arg2]:
+       (print foo myfun)
        (print :hello :world)
        (print arg1 arg2)
        (print :end)))

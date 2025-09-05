@@ -2,6 +2,7 @@
 import unicodedata
 import string
 
+# lex阶段生成的ast类型
 NONE              = 'none'
 TRUE              = 'true'
 FALSE             = 'false'
@@ -12,7 +13,6 @@ DOUBLE_STRING     = 'double-string'
 BACKTICK_STRING   = 'backtick-string'
 EXTERN_STRING     = 'extern-string'   # extern = single + double + backtick
 INTERN_STRING     = 'intern-string'
-STRING            = 'string'          # string = extern + intern
 VARARG            = '...'
 IDENTIFIER        = 'identifier'
 MULTI_IDENTIFIER  = 'multi-identifier'
@@ -23,6 +23,11 @@ HASH_LIST         = 'hash-list'
 LIST_LIST         = 'list-list'
 DICT_LIST         = 'dict-list'
 
+# parse阶段新增的ast类型
+KV_LIST           = 'kv-list'
+
+# interpret阶段使用的类型
+STRING            = 'string'          # string = extern + intern
 UPVALUE           = 'upvalue'
 CLOSURE           = 'closure'
 
@@ -94,10 +99,10 @@ new_scope_creators = set([
         ])
 
 class Variable:
-    def __init__(self, name, ast, isupval=False):
+    def __init__(self, name, ast, origin=False):
         self.name = name
         self.ast = ast
-        self.isupvar = isupval
+        self.origin = origin
 
 
 class AstNode:
@@ -110,24 +115,15 @@ class AstNode:
         self.upvars = None       # name -> ast
 
     def append(self, value):
+        if self.value:
+            prev = self.value[-1]
+            prev.next = value
+        else:
+            prev = None
+        value.prev = prev
+        value.next = None
         self.value.append(value)
         value.parent = self
-
-    def prev(self):
-        if not self.parent:
-            return None
-        siblings = self.parent.value
-        i = siblings.index(self)
-        if i == 0: return None
-        return siblings[i-1]
-
-    def next(self):
-        if not self.parent:
-            return None
-        siblings = self.parent.value
-        i = siblings.index(self)
-        if i == len(siblings)-1: return None
-        return siblings[i+1]
 
     def isfn(self):
         if self.tag == HASH_LIST:
@@ -198,7 +194,7 @@ class AstNode:
         if self.upvars is None:
             return None
         if name in self.upvars:
-            return Variable(name, self.upvars[name], True)
+            return Variable(name, self, self.upvars[name])
         return None
 
     def queryvar(self, name=None):
@@ -208,18 +204,17 @@ class AstNode:
         """
         name = name if name else self.value
         node = self
-        closure = None
+        closures = []
         while node:
             var = node.getvar(name)
             if var:
-                if closure:
-                    var.isupvar = True
+                for closure in closures:
                     if closure.upvars is None:
                         closure.upvars = {}
-                    closure.upvars[name] = var.ast
+                    closure.upvars[name] = var.origin or var.ast
                 return var
-            if not closure and node.isfn():
-                closure = node
+            if node.isfn():
+                closures.append(node)
             node = node.parent
         return None
 
@@ -251,6 +246,10 @@ class AstNode:
             value = '{' + value + '}'
         elif self.tag == HASH_LIST:
             value = f'#{self.value[0]}'
+        elif self.tag == KV_LIST: # parse后新生成的tag
+            value = f'{self.value[0]}: {self.value[1]},'
+        if self.upvars:
+            value = f'({list(self.upvars.keys())}){value}'
         if self.boundvars:
             value = f'<{self.boundvars}>{value}'
         if self.suffix:
@@ -336,10 +335,11 @@ def lex(code):
     i = 0
     prefetch = []
     root = AstNode(CODE_LIST, [])
-    root.append(AstNode(IDENTIFIER, 'fn'))
-    root.append(AstNode(LIST_LIST, [], ':'))
-    stack = [root]
-
+    rootfn = AstNode(CODE_LIST, [])
+    root.append(rootfn)
+    rootfn.append(AstNode(IDENTIFIER, 'fn'))
+    rootfn.append(AstNode(LIST_LIST, [], ':'))
+    stack = [rootfn]
 
     def getc():
         nonlocal i
@@ -452,7 +452,7 @@ def lex(code):
         if stack[-1].tag != t:
             print(stack[-1])
             error("unpaired )/]/}")
-        if stack[-1] is root:
+        if stack[-1] is rootfn:
             error("redundant ')'")
         node = stack.pop()
         return finish_node(node)
@@ -657,6 +657,13 @@ builtins = set([
 ])
 
 
+def mkpair(k,v):
+    kv = AstNode(KV_LIST, [])
+    kv.append(k)
+    kv.append(v)
+    return kv
+
+
 def parse(ast):
     if ast.tag in (NONE, TRUE, FALSE):
         pass
@@ -686,6 +693,7 @@ def parse(ast):
                 hash.addvar(arg, True)
         var = ast.queryvar()
         if not var:
+            print(ast.getscope())
             raise RuntimeError(f"Unknown identifier {ast.value}")
     elif ast.tag == MULTI_IDENTIFIER:
         i = ast.value.index('.')
@@ -707,9 +715,10 @@ def parse(ast):
                 raise RuntimeError(f"Invalid list item suffix '{item.suffix}'")
             parse(item)
     elif ast.tag == DICT_LIST:
-        pairs = []
+        dlist = ast.value
+        ast.value = []
         key = None
-        for item in ast.value:
+        for item in dlist:
             if not key:
                 if item.suffix == ':':
                     if item.tag == IDENTIFIER:
@@ -730,12 +739,11 @@ def parse(ast):
                     else:
                         raise RuntimeError(f"Invalid dict expression: {item}")
             parse(item)
-            pairs.append((key, item))
+            ast.append(mkpair(key, item))
             key = None
-        ast.value = pairs
     else:
         error(f"invalid ast: {ast}")
-    
+
 
 def parse_destructure(ast):
     if ast.tag == IDENTIFIER:
@@ -753,9 +761,10 @@ def parse_destructure(ast):
             else:
                 raise RuntimeError("invalid list destructure")
     elif ast.tag == DICT_LIST:
-        pairs = []
+        dlist = ast.value
+        ast.value = []
         key = None
-        for item in ast.value:
+        for item in dlist:
             if not key:
                 if item.suffix == ':':
                     if item.tag == IDENTIFIER:
@@ -766,24 +775,23 @@ def parse_destructure(ast):
                 elif item.tag == IDENTIFIER:
                     k = AstNode(INTERN_STRING, item.value)
                     item.addvartoscope(item.value)
-                    pairs.append((k, item))
+                    ast.append(mkpair(k, item))
                 elif item.tag == AND_REMINDER:
                     k = AstNode(INTERN_STRING, '&')
                     item.addvartoscope(item.value)
-                    pairs.append((k, item))
+                    ast.append(mkpair(k, item))
                 elif item.tag == AT_WHOLE:
                     k = AstNode(INTERN_STRING, '@')
                     item.addvartoscope(item.value)
-                    pairs.append((k, item))
+                    ast.append(mkpair(k, item))
                 else:
                     raise RuntimeError("invalid dict destructure")
             elif item.tag in (IDENTIFIER, LIST_LIST, DICT_LIST):
                 parse_destructure(item)
-                pairs.append((key, item))
+                ast.append(mkpair(key, item))
                 key = None
             else:
                 raise RuntimeError(f"Invalid dict value {item}")
-        ast.value = pairs
     else:
         error(f"invalid destructure: {ast}")
 
@@ -817,7 +825,8 @@ def parse_pattern(ast):
             else:
                 raise RuntimeError("invalid list destructure")
     elif ast.tag == DICT_LIST:
-        pairs = []
+        dlist = ast.value
+        ast.value = []
         key = None
         for item in ast.value:
             if not key:
@@ -830,15 +839,15 @@ def parse_pattern(ast):
                 elif item.tag == IDENTIFIER:
                     k = AstNode(INTERN_STRING, item.value)
                     item.addvartoscope(item.value)
-                    pairs.append((k, item))
+                    ast.append(mkpair(k, item))
                 elif item.tag == AND_REMINDER:
                     k = AstNode(INTERN_STRING, '&')
                     item.addvartoscope(item.value)
-                    pairs.append((k, item))
+                    ast.append(mkpair(k, item))
                 elif item.tag == AT_WHOLE:
                     k = AstNode(INTERN_STRING, '@')
                     item.addvartoscope(item.value)
-                    pairs.append((k, item))
+                    ast.append(mkpair(k, item))
                 elif (item.tag == CODE_LIST and
                       len(item.value) == 2 and
                       item.value[0].tag == IDENTIFIER and
@@ -846,16 +855,15 @@ def parse_pattern(ast):
                       item.value[1].tag == IDENTIFIER):
                     parse(item)
                     k = AstNode(INTERN_STRING, item.value[1].value)
-                    pairs.append((k, item))
+                    ast.append(mkpair(k, item))
                 else:
                     raise RuntimeError("invalid dict destructure")
             elif item.tag not in (VARARG, AND_REMINDER, AT_WHOLE, HASH_LIST):
                 parse_pattern(item)
-                pairs.append((key, item))
+                ast.append(mkpair(key, item))
                 key = None
             else:
                 raise RuntimeError(f"Invalid dict value {item}")
-        ast.value = pairs
     else:
         error(f"invalid ast: {ast}")
     
@@ -896,6 +904,8 @@ def parse_code_list(ast):
                 raise RuntimeError("Invalid case pattern")
             elif pattern.value[0].tag != IDENTIFIER:
                 raise RuntimeError("Invalid case pattern")
+            elif pattern.value[0].value in ('values', 'or'):
+                parse_pattern(pattern)
             elif pattern.value[0].value == 'values':
                 for p in pattern.value[1:]:
                     parse_pattern(p)
@@ -936,7 +946,7 @@ def parse_code_list(ast):
         def parse_elif(ast):
             if len(ast.value) < 3:
                 raise RuntimeError("Invalid elif expression")
-            if ast.prev().special not in (IF_LIST, ELIF_LIST):
+            if ast.prev and ast.prev.special not in (IF_LIST, ELIF_LIST):
                 raise RuntimeError("No previous if/elif expression")
             ast.special = ELIF_LIST
             pred = ast.value[1]
@@ -949,7 +959,7 @@ def parse_code_list(ast):
                 raise RuntimeError("Invalid else expression")
             if ast.value[0].suffix != ':':
                 raise RuntimeError("No ':' after else")
-            if ast.prev().special not in (IF_LIST, ELIF_LIST, WHILE_LIST, FOR_LIST, EACH_LIST):
+            if ast.prev and ast.prev.special not in (IF_LIST, ELIF_LIST, WHILE_LIST, FOR_LIST, EACH_LIST):
                 raise RuntimeError("No previous if/elif/while/for/each expression")
             ast.special = ELSE_LIST
             for item in ast.value[1:]:
@@ -1125,9 +1135,12 @@ def parse_code_list(ast):
                 parse(item)
 
 
-def interpret(root):
+def interpret(code):
+    root = lex(code)
+    parse(root)
+
     interns = set()
-    g = Frame(root)
+    g = Frame(ast)
     stack = [g]
     openupvals = {}
     none = Value(NONE)
@@ -1154,7 +1167,6 @@ def interpret(root):
             frame = stack[-1]
             if ast.value in frame.variables:
                 return frame.variables[ast.value]
-            
         elif ast.tag == MULTI_IDENTIFIER:
             pass
         elif ast.tag == AND_REMINDER:
@@ -1171,7 +1183,7 @@ def interpret(root):
             pass
         else:
             error(f"invalid ast: {ast}")
-    return eval(root, g)
+    return eval(root)
     
 
 if __name__ == '__main__':
