@@ -807,7 +807,11 @@ def parse_pattern(ast):
     elif ast.tag == IDENTIFIER:
         ast.addvartoscope(ast.value)
     elif ast.tag == CODE_LIST:
-        parse_code_list(ast)
+        if ast.value and ast.value[0].tag == IDENTIFIER and ast.value[0].value == 'values':
+            for item in ast.value[1:]:
+                parse_pattern(item)
+        else:
+            parse_code_list(ast)
     elif ast.tag == LIST_LIST:
         for item in ast.value:
             if item.suffix:
@@ -898,30 +902,35 @@ def parse_code_list(ast):
             pattern = ast.value[1]
             if pattern.suffix != ':':
                 raise RuntimeError("No ':' after case pattern")
-            if pattern.tag != CODE_LIST:
+            parse_pattern(pattern)
+            for item in ast.value[2:]:
+                parse(item)
+        def parse_caseif(ast):
+            if len(ast.value) < 4:
+                raise RuntimeError("Invalid caseif expression")
+            if ast.parent.special != MATCH_LIST:
+                raise RuntimeError("caseif expression must be in match expression")
+            ast.special = CASEIF_LIST
+            pattern = ast.value[1]
+            parse_pattern(pattern)
+            cond = ast.value[2]
+            if cond.suffix != ':':
+                raise RuntimeError("No ':' after caseif condition")
+            for item in ast.value[2:]:
+                parse(item)
+        def parse_cases(ast):
+            if len(ast.value) < 3:
+                raise RuntimeError("Invalid cases expression")
+            if ast.parent.special != MATCH_LIST:
+                raise RuntimeError("cases expression must be in match expression")
+            ast.special = CASES_LIST
+            patterns = ast.value[1]
+            if patterns.suffix != ':':
+                raise RuntimeError("No ':' after cases patterns")
+            if patterns.tag != LIST_LIST or not patterns.value:
+                raise RuntimeError("Invalid cases expression")
+            for pattern in patterns.value:
                 parse_pattern(pattern)
-            elif not pattern.value:
-                raise RuntimeError("Invalid case pattern")
-            elif pattern.value[0].tag != IDENTIFIER:
-                raise RuntimeError("Invalid case pattern")
-            elif pattern.value[0].value in ('values', 'or'):
-                parse_pattern(pattern)
-            elif pattern.value[0].value == 'values':
-                for p in pattern.value[1:]:
-                    parse_pattern(p)
-            elif pattern.value[0].value == 'and':
-                if len(pattern.value) < 2:
-                    raise RuntimeError("Invalid case pattern")
-                parse_pattern(pattern.value[1])
-                for item in pattern.value[2:]:
-                    parse(item)
-            elif pattern.value[0].value == 'or':
-                if len(pattern.value) < 2:
-                    raise RuntimeError("Invalid case pattern")
-                for p in pattern.value[1:]:
-                    parse_pattern(p)
-            else:
-                raise RuntimeError("Invalid case pattern")
             for item in ast.value[2:]:
                 parse(item)
         def parse_default(ast):
@@ -1102,6 +1111,8 @@ def parse_code_list(ast):
             'do': parse_do,
             'match': parse_match,
             'case': parse_case,
+            'caseif': parse_caseif,
+            'cases': parse_cases,
             'default': parse_default,
             'if': parse_if,
             'elif': parse_elif,
