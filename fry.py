@@ -263,11 +263,16 @@ class AstNode:
             return f"{value}"
 
 
+next_frame_id = 1
+
 class Frame:
     """
     动态作用域
     """
     def __init__(self, ast):
+        global next_frame_id
+        self.id = next_frame_id
+        next_frame_id += 1
         self.ast = ast
         self.variables = {}
 
@@ -1165,6 +1170,7 @@ def interpret(code):
     g = Frame(ast)
     stack = [g]
     openupvals = {}
+
     none = Value(NONE)
     true = Value(TRUE)
     false = Value(FALSE)
