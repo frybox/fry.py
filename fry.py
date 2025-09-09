@@ -25,6 +25,7 @@ DICT_LIST         = 'dict-list'
 
 # parse阶段新增的ast类型
 KV_LIST           = 'kv-list'
+COND_LIST         = 'cond-list'
 
 # interpret阶段使用的类型
 STRING            = 'string'          # string = extern + intern
@@ -134,6 +135,39 @@ class AstNode:
         value.next = None
         self.value.append(value)
         value.parent = self
+
+    ## TODO
+    def insert(self, i, value):
+        size = len(self.value)
+        if size == 0: i = 0
+        while i < 0:
+            i += size
+        if size > 0 and i >= -size and i < size:
+            next = self.value[i]
+            prev = next.prev
+        else:
+            next = prev = None
+        value.prev = prev
+        value.next = next
+        if prev: prev.next = value
+        if next: next.prev = value
+        self.value.insert(i, value)
+
+    def remove(self):
+        if not self.parent:
+            return
+        if self.prev: self.prev.next = self.next
+        if self.next: self.next.prev = self.prev
+        self.parent.value.remove(self)
+        self.prev = self.next = self.parent = None
+
+    def replacewith(self, other):
+        self.tag = other.tag
+        self.value = other.value
+        self.suffix = other.suffix
+
+    def index(self, value):
+        return self.value.index(value)
 
     def isfn(self):
         if self.tag == HASH_LIST:
@@ -724,6 +758,12 @@ def mkpair(k,v):
     kv.append(v)
     return kv
 
+def mkcond(items):
+    cond = AstNode(COND_LIST, [])
+    for item in items:
+        cond.append(item)
+    return cond
+
 
 def parse(ast):
     if ast.tag in (NONE, TRUE, FALSE):
@@ -1019,6 +1059,18 @@ def parse_code_list(ast):
                 raise RuntimeError("No ':' after if predication")
             for item in ast.value[1:]:
                 parse(item)
+            # TODO
+            cond = [ast]
+            next = ast.next
+            while next and next.tag == CODE_LIST and next.value[0].tag == IDENTIFIER and next.value[0].value in ('elif', 'else'):
+                parse(next)
+                cond.append(next)
+                next = next.next
+            if len(cond) > 1:
+                for c in cond[1:]:
+                    c.remove()
+                cond = mkcond(cond)
+                ast.replacewith(cond)
         def parse_elif(ast):
             if len(ast.value) < 3:
                 raise RuntimeError("Invalid elif expression")
@@ -1049,6 +1101,13 @@ def parse_code_list(ast):
                 raise RuntimeError("No ':' after while predication")
             for item in ast.value[1:]:
                 parse(item)
+            # TODO
+            next = ast.next
+            if next and next.tag == CODE_LIST and next.value[0].tag == IDENTIFIER and next.value[0].value == 'else':
+                parse(next)
+                next.remove()
+                cond = mkcond([ast, next])
+                ast.replacewith(cond)
         def parse_for(ast):
             if len(ast.value) < 3:
                 raise RuntimeError("Invalid for expression")
@@ -1067,6 +1126,13 @@ def parse_code_list(ast):
                 parse(item)
             for item in ast.value[2:]:
                 parse(item)
+            # TODO
+            next = ast.next
+            if next and next.tag == CODE_LIST and next.value[0].tag == IDENTIFIER and next.value[0].value == 'else':
+                parse(next)
+                next.remove()
+                cond = mkcond([ast, next])
+                ast.replacewith(cond)
         def parse_each(ast):
             if len(ast.value) < 3:
                 raise RuntimeError("Invalid each expression")
@@ -1083,6 +1149,13 @@ def parse_code_list(ast):
             parse(pred.value[-1])
             for item in ast.value[2:]:
                 parse(item)
+            # TODO
+            next = ast.next
+            if next and next.tag == CODE_LIST and next.value[0].tag == IDENTIFIER and next.value[0].value == 'else':
+                parse(next)
+                next.remove()
+                cond = mkcond([ast, next])
+                ast.replacewith(cond)
         def parse_break(ast):
             ast.special = BREAK_LIST
         def parse_continue(ast):
