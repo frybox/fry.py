@@ -1363,6 +1363,9 @@ def interpret(code):
             return len(v.value) != 0
         return True
 
+    def eval_cond(ast):
+        pass
+
     def eval_code(ast):
         if not ast.value:
             raise RuntimeError("Invalid empty code list")
@@ -1590,6 +1593,8 @@ def interpret(code):
             raise RuntimeError("not support finally")
         def eval_throw(ast):
             raise RuntimeError("not support throw")
+        def eval_normal(op, args):
+            pass
 
         specials = {
             'do': eval_do,
@@ -1598,7 +1603,6 @@ def interpret(code):
             'caseif': eval_caseif,
             'cases': eval_cases,
             'default': eval_default,
-            'cond': eval_cond,
             'if': eval_if,
             'elif': eval_elif,
             'else': eval_else,
@@ -1627,8 +1631,11 @@ def interpret(code):
         if op.tag == IDENTIFIER and op.value in specials:
                 return specials[op.value](ast)
         else:
-            for item in ast.value:
-                eval(item)
+            op = eval(ast.value[0])
+            args = []
+            for item in ast.value[1:]:
+                args.append(eval(item))
+            return eval_normal(op, args)
 
     def eval_hash(ast):
         pass
@@ -1667,6 +1674,8 @@ def interpret(code):
             pass
         elif ast.tag == AT_WHOLE:
             pass
+        elif ast.tag == COND_LIST:
+            return eval_cond(ast)
         elif ast.tag == CODE_LIST:
             return eval_code(ast)
         elif ast.tag == HASH_LIST:
@@ -1678,7 +1687,7 @@ def interpret(code):
         else:
             error(f"invalid ast: {ast}")
     return eval(root)
-    
+
 
 if __name__ == '__main__':
     import sys
