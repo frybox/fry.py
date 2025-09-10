@@ -122,6 +122,8 @@ class AstNode:
         self.value = value
         self.suffix = suffix
         self.parent = None
+        self.prev = None
+        self.next = None
         self.boundvars = None    # name set
         self.upvars = None       # name -> ast
 
@@ -136,22 +138,23 @@ class AstNode:
         self.value.append(value)
         value.parent = self
 
-    ## TODO
     def insert(self, i, value):
         size = len(self.value)
-        if size == 0: i = 0
-        while i < 0:
+        if i < -size:
+            i = 0
+        elif i < 0:
             i += size
-        if size > 0 and i >= -size and i < size:
+        if i >= size:
+            self.append(value)
+        else:
             next = self.value[i]
             prev = next.prev
-        else:
-            next = prev = None
-        value.prev = prev
-        value.next = next
-        if prev: prev.next = value
-        if next: next.prev = value
-        self.value.insert(i, value)
+            value.prev = prev
+            value.next = next
+            value.parent = self
+            if prev: prev.next = value
+            if next: next.prev = value
+            self.value.insert(i, value)
 
     def remove(self):
         if not self.parent:
@@ -292,6 +295,9 @@ class AstNode:
             value = f'#{self.value[0]}'
         elif self.tag == KV_LIST: # parse后新生成的tag
             value = f'{self.value[0]}: {self.value[1]},'
+        elif self.tag == COND_LIST: # parse后新生成的tag
+            value = ' '.join(f'{v}' for v in self.value)
+            value = f'(cond: {value})'
         if self.upvars:
             value = f'({list(self.upvars.keys())}){value}'
         if self.boundvars:
@@ -1023,7 +1029,8 @@ def parse_code_list(ast):
             cond = ast.value[2]
             if cond.suffix != ':':
                 raise RuntimeError("No ':' after caseif condition")
-            for item in ast.value[2:]:
+            parse(cond)
+            for item in ast.value[3:]:
                 parse(item)
         def parse_cases(ast):
             if len(ast.value) < 3:
@@ -1036,8 +1043,17 @@ def parse_code_list(ast):
                 raise RuntimeError("No ':' after cases patterns")
             if patterns.tag != LIST_LIST or not patterns.value:
                 raise RuntimeError("Invalid cases expression")
+            varslist = []
             for pattern in patterns.value:
                 parse_pattern(pattern)
+                varslist.append(ast.boundvars)
+                ast.boundvars = None
+            vars = varslist[0]
+            for vs in varslist[1:]:
+                if vars != vs:
+                    print(ast)
+                    raise RuntimeError('not same vars in cases patterns')
+            ast.boundvars = vars
             for item in ast.value[2:]:
                 parse(item)
         def parse_default(ast):
@@ -1060,6 +1076,8 @@ def parse_code_list(ast):
             for item in ast.value[1:]:
                 parse(item)
             # TODO
+            parent = ast.parent
+            i = parent.index(ast)
             cond = [ast]
             next = ast.next
             while next and next.tag == CODE_LIST and next.value[0].tag == IDENTIFIER and next.value[0].value in ('elif', 'else'):
@@ -1067,10 +1085,10 @@ def parse_code_list(ast):
                 cond.append(next)
                 next = next.next
             if len(cond) > 1:
-                for c in cond[1:]:
+                for c in cond:
                     c.remove()
                 cond = mkcond(cond)
-                ast.replacewith(cond)
+                parent.insert(i, cond)
         def parse_elif(ast):
             if len(ast.value) < 3:
                 raise RuntimeError("Invalid elif expression")
@@ -1102,12 +1120,15 @@ def parse_code_list(ast):
             for item in ast.value[1:]:
                 parse(item)
             # TODO
+            parent = ast.parent
+            i = parent.index(ast)
             next = ast.next
             if next and next.tag == CODE_LIST and next.value[0].tag == IDENTIFIER and next.value[0].value == 'else':
                 parse(next)
+                ast.remove()
                 next.remove()
                 cond = mkcond([ast, next])
-                ast.replacewith(cond)
+                parent.insert(i, cond)
         def parse_for(ast):
             if len(ast.value) < 3:
                 raise RuntimeError("Invalid for expression")
@@ -1127,12 +1148,15 @@ def parse_code_list(ast):
             for item in ast.value[2:]:
                 parse(item)
             # TODO
+            parent = ast.parent
+            i = parent.index(ast)
             next = ast.next
             if next and next.tag == CODE_LIST and next.value[0].tag == IDENTIFIER and next.value[0].value == 'else':
                 parse(next)
+                ast.remove()
                 next.remove()
                 cond = mkcond([ast, next])
-                ast.replacewith(cond)
+                parent.insert(i, cond)
         def parse_each(ast):
             if len(ast.value) < 3:
                 raise RuntimeError("Invalid each expression")
@@ -1150,12 +1174,15 @@ def parse_code_list(ast):
             for item in ast.value[2:]:
                 parse(item)
             # TODO
+            parent = ast.parent
+            i = parent.index(ast)
             next = ast.next
             if next and next.tag == CODE_LIST and next.value[0].tag == IDENTIFIER and next.value[0].value == 'else':
                 parse(next)
+                ast.remove()
                 next.remove()
                 cond = mkcond([ast, next])
-                ast.replacewith(cond)
+                parent.insert(i, cond)
         def parse_break(ast):
             ast.special = BREAK_LIST
         def parse_continue(ast):
@@ -1625,7 +1652,7 @@ def interpret(code):
         elif ast.tag == MULTI_IDENTIFIER:
             ids = ast.value.split('.')
             var = getvar(ids[0])
-            for key in ids[1:]):
+            for key in ids[1:]:
                 var = var.get().get(key)
             return var.get()
         elif ast.tag == AND_REMINDER:

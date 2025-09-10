@@ -62,11 +62,11 @@
 (fn _extract_text_by_file_extension [file_content, file_extension]:
   `Extract text from a file based on its file extension.
   (match file_extension:
-    (case (or :.txt :.markdown :.md :.html :.htm :.xml :.vtt):
+    (cases [:.txt :.markdown :.md :.html :.htm :.xml :.vtt]:
       (_extract_text_from_plain_text file_content))
     (case :.json:
       (_extract_text_from_json file_content))
-    (case (or :.yaml :.yml):
+    (cases [:.yaml :.yml]:
       (_extract_text_from_yaml file_content))
     (case :.pdf:
       (_extract_text_from_pdf file_content))
