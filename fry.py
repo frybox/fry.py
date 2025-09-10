@@ -798,6 +798,7 @@ def parse(ast):
             for i in range(1, n+1):
                 arg = f'${i}'
                 hash.addvar(arg, True)
+            hash.argv = [f'${i}' for i in range(1, n+1)]
         var = ast.queryvar()
         if not var:
             print(ast.getscope())
@@ -1075,7 +1076,6 @@ def parse_code_list(ast):
                 raise RuntimeError("No ':' after if predication")
             for item in ast.value[1:]:
                 parse(item)
-            # TODO
             parent = ast.parent
             i = parent.index(ast)
             cond = [ast]
@@ -1119,7 +1119,6 @@ def parse_code_list(ast):
                 raise RuntimeError("No ':' after while predication")
             for item in ast.value[1:]:
                 parse(item)
-            # TODO
             parent = ast.parent
             i = parent.index(ast)
             next = ast.next
@@ -1142,12 +1141,12 @@ def parse_code_list(ast):
                 raise RuntimeError("Invalid for parameter list")
             if pred.value[0].tag != IDENTIFIER:
                 raise RuntimeError("Invalid for parameter")
-            pred.addvartoscope(pred.value[0].value)
             for item in pred.value[1:]:
                 parse(item)
+            # 绑定标识符应放到求值之后
+            pred.addvartoscope(pred.value[0].value)
             for item in ast.value[2:]:
                 parse(item)
-            # TODO
             parent = ast.parent
             i = parent.index(ast)
             next = ast.next
@@ -1168,12 +1167,13 @@ def parse_code_list(ast):
                 raise RuntimeError("Invalid each parameter list")
             if len(pred.value) < 2:
                 raise RuntimeError("Invalid each parameter list")
+            parse(pred.value[-1])
+            # 绑定标识符应放到求值之后
             for item in pred.value[:-1]:
                 parse_destructure(item)
-            parse(pred.value[-1])
+
             for item in ast.value[2:]:
                 parse(item)
-            # TODO
             parent = ast.parent
             i = parent.index(ast)
             next = ast.next
@@ -1200,29 +1200,35 @@ def parse_code_list(ast):
                 raise RuntimeError("No ':' after fn parameter list")
             if arglist.tag != LIST_LIST:
                 raise RuntimeError("Invalid fn parameter list")
+            argv = []
             for arg in arglist.value:
                 if arg.tag == IDENTIFIER:
                     arg.addvartoscope(arg.value)
+                    argv.append(arg.value)
                 elif arg.tag == VARARG:
                     arg.addvartoscope('...')
+                    argv.append('...')
                 else:
                     raise RuntimeError(f"Invalid fn argument: {arg}")
+            ast.argv = argv
             for item in ast.value[ai+1:]:
                 parse(item)
         def parse_let(ast):
             if len(ast.value) < 3:
                 raise RuntimeError("Invalid let expression")
             ast.special = LET_LIST
+            parse(ast.value[-1])
+            # 绑定标识符应放到求值之后
             for item in ast.value[1:-1]:
                 parse_destructure(item)
-            parse(ast.value[-1])
         def parse_var(ast):
             if len(ast.value) < 3:
                 raise RuntimeError("Invalid var expression")
             ast.special = VAR_LIST
+            parse(ast.value[-1])
+            # 绑定标识符应放到求值之后
             for item in ast.value[1:-1]:
                 parse_destructure(item)
-            parse(ast.value[-1])
         def parse_set(ast):
             if len(ast.value) != 3:
                 raise RuntimeError("Invalid set expression")
@@ -1233,9 +1239,10 @@ def parse_code_list(ast):
             if len(ast.value) < 3:
                 raise RuntimeError("Invalid import expression")
             ast.special = IMPORT_LIST
+            parse(ast.value[-1])
+            # 绑定标识符应放到求值之后
             for item in ast.value[1:-1]:
                 parse_destructure(item)
-            parse(ast.value[-1])
         def parse_values(ast):
             if len(ast.value) < 2:
                 raise RuntimeError("Invalid values expression")
