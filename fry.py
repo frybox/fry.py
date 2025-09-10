@@ -1598,6 +1598,7 @@ def interpret(code):
             'caseif': eval_caseif,
             'cases': eval_cases,
             'default': eval_default,
+            'cond': eval_cond,
             'if': eval_if,
             'elif': eval_elif,
             'else': eval_else,
