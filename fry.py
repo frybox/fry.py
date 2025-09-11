@@ -31,6 +31,7 @@ COND_LIST         = 'cond-list'
 STRING            = 'string'          # string = extern + intern
 UPVALUE           = 'upvalue'
 CLOSURE           = 'closure'
+PYFUNCTION        = 'pyfunction'
 VARIABLE          = 'variable'
 LIST              = 'list'
 DICT              = 'dict'
@@ -355,6 +356,14 @@ class Closure(Value):
         """
         super().__init__(CLOSURE, fn)
         self.upvalues = {} # map[name -> frameid]
+
+
+class PyFunction(Value):
+    def __init__(self, pf):
+        """
+        pf是Python函数
+        """
+        super().__init__(PYFUNCTION, pf)
 
 
 class Variable(Value):
@@ -1328,7 +1337,7 @@ def interpret(code):
     g = Frame(root)
     stack = [g]
     frames = {g.id: g} # map[frameid -> frame]
-    upvars = {}        # map[frameid -> tuple(set[varname], map[varname -> val])]
+    upvars = {}        # map[frameid -> map[varname -> val]
 
     none = Value(NONE)
     true = Value(TRUE)
@@ -1363,270 +1372,281 @@ def interpret(code):
             return len(v.value) != 0
         return True
 
-    def eval_cond(ast):
-        pass
+    def mkframe(ast):
+        frame = Frame(ast)
+        stack.append(frame)
+        frames[frame.id] = frame
+
+    def closeframe(fid=None):
+        fid = fid if fid else stack[-1].id
+        if fid in frames:
+            frameid = 0
+            while frameid != fid:
+                frame = stack.pop()
+                frameid = frame.id
+                del frames[frameid]
+                closevars = upvars.get(frameid, {})
+                for varname in closevars.keys():
+                    closevars[varname] = frame.vars[varname]
+
+    def eval_code_do(ast):
+        value = none
+        for exp in ast.value:
+            value = eval(exp)
+        return value
+    def eval_code_match(ast):
+        expr = ast.value[1]
+        value = eval(expr)
+        for item in ast.value[2:]:
+            eval(item)
+    def eval_code_case(ast):
+        if len(ast.value) < 3:
+            raise RuntimeError("Invalid case expression")
+        if ast.parent.special != MATCH_LIST:
+            raise RuntimeError("case expression must be in match expression")
+        ast.special = CASE_LIST
+        pattern = ast.value[1]
+        if pattern.suffix != ':':
+            raise RuntimeError("No ':' after case pattern")
+        eval_pattern(pattern)
+        for item in ast.value[2:]:
+            eval(item)
+    def eval_code_caseif(ast):
+        if len(ast.value) < 4:
+            raise RuntimeError("Invalid caseif expression")
+        if ast.parent.special != MATCH_LIST:
+            raise RuntimeError("caseif expression must be in match expression")
+        ast.special = CASEIF_LIST
+        pattern = ast.value[1]
+        eval_pattern(pattern)
+        cond = ast.value[2]
+        if cond.suffix != ':':
+            raise RuntimeError("No ':' after caseif condition")
+        for item in ast.value[2:]:
+            eval(item)
+    def eval_code_cases(ast):
+        if len(ast.value) < 3:
+            raise RuntimeError("Invalid cases expression")
+        if ast.parent.special != MATCH_LIST:
+            raise RuntimeError("cases expression must be in match expression")
+        ast.special = CASES_LIST
+        patterns = ast.value[1]
+        if patterns.suffix != ':':
+            raise RuntimeError("No ':' after cases patterns")
+        if patterns.tag != LIST_LIST or not patterns.value:
+            raise RuntimeError("Invalid cases expression")
+        for pattern in patterns.value:
+            eval_pattern(pattern)
+        for item in ast.value[2:]:
+            eval(item)
+    def eval_code_default(ast):
+        if len(ast.value) < 2:
+            raise RuntimeError("Invalid default expression")
+        if ast.parent.special != MATCH_LIST:
+            raise RuntimeError("default expression must be in match expression")
+        if ast.value[0].suffix != ':':
+            raise RuntimeError("No ':' after default")
+        ast.special = DEFAULT_LIST
+        for item in ast.value[1:]:
+            eval(item)
+    def eval_code_if(ast):
+        if len(ast.value) < 3:
+            raise RuntimeError("Invalid if expression")
+        ast.special = IF_LIST
+        pred = ast.value[1]
+        if pred.suffix != ':':
+            raise RuntimeError("No ':' after if predication")
+        for item in ast.value[1:]:
+            eval(item)
+    def eval_code_elif(ast):
+        if len(ast.value) < 3:
+            raise RuntimeError("Invalid elif expression")
+        if ast.prev and ast.prev.special not in (IF_LIST, ELIF_LIST):
+            raise RuntimeError("No previous if/elif expression")
+        ast.special = ELIF_LIST
+        pred = ast.value[1]
+        if pred.suffix != ':':
+            raise RuntimeError("No ':' after elif predication")
+        for item in ast.value[1:]:
+            eval(item)
+    def eval_code_else(ast):
+        if len(ast.value) < 2:
+            raise RuntimeError("Invalid else expression")
+        if ast.value[0].suffix != ':':
+            raise RuntimeError("No ':' after else")
+        if ast.prev and ast.prev.special not in (IF_LIST, ELIF_LIST, WHILE_LIST, FOR_LIST, EACH_LIST):
+            raise RuntimeError("No previous if/elif/while/for/each expression")
+        ast.special = ELSE_LIST
+        for item in ast.value[1:]:
+            eval(item)
+    def eval_code_while(ast):
+        if len(ast.value) < 3:
+            raise RuntimeError("Invalid while expression")
+        ast.special = WHILE_LIST
+        pred = ast.value[1]
+        if pred.suffix != ':':
+            raise RuntimeError("No ':' after while predication")
+        for item in ast.value[1:]:
+            eval(item)
+    def eval_code_for(ast):
+        if len(ast.value) < 3:
+            raise RuntimeError("Invalid for expression")
+        ast.special = FOR_LIST
+        pred = ast.value[1]
+        if pred.suffix != ':':
+            raise RuntimeError("No ':' after for parameter list")
+        if pred.tag != LIST_LIST:
+            raise RuntimeError("Invalid for parameter list")
+        if len(pred.value) not in (3, 4):
+            raise RuntimeError("Invalid for parameter list")
+        if pred.value[0].tag != IDENTIFIER:
+            raise RuntimeError("Invalid for parameter")
+        pred.addvartoscope(pred.value[0].value)
+        for item in pred.value[1:]:
+            eval(item)
+        for item in ast.value[2:]:
+            eval(item)
+    def eval_code_each(ast):
+        if len(ast.value) < 3:
+            raise RuntimeError("Invalid each expression")
+        ast.special = EACH_LIST
+        pred = ast.value[1]
+        if pred.suffix != ':':
+            raise RuntimeError("No ':' after each parameter list")
+        if pred.tag != LIST_LIST:
+            raise RuntimeError("Invalid each parameter list")
+        if len(pred.value) < 2:
+            raise RuntimeError("Invalid each parameter list")
+        for item in pred.value[:-1]:
+            eval_destructure(item)
+        eval(pred.value[-1])
+        for item in ast.value[2:]:
+            eval(item)
+    def eval_code_break(ast):
+        ast.special = BREAK_LIST
+    def eval_code_continue(ast):
+        ast.special = CONTINUE_LIST
+    def eval_code_fn(ast):
+        if len(ast.value) < 3:
+            raise RuntimeError("Invalid fn expression")
+        ast.special = FN_LIST
+        ai = 1
+        if ast.value[1].tag == IDENTIFIER:
+            ast.addvartoscope(ast.value[1].value)
+            ai = 2
+        arglist = ast.value[ai]
+        if arglist.suffix != ':':
+            raise RuntimeError("No ':' after fn parameter list")
+        if arglist.tag != LIST_LIST:
+            raise RuntimeError("Invalid fn parameter list")
+        for arg in arglist.value:
+            if arg.tag == IDENTIFIER:
+                arg.addvartoscope(arg.value)
+            elif arg.tag == VARARG:
+                arg.addvartoscope('...')
+            else:
+                raise RuntimeError(f"Invalid fn argument: {arg}")
+        for item in ast.value[ai+1:]:
+            eval(item)
+    def eval_code_let(ast):
+        if len(ast.value) < 3:
+            raise RuntimeError("Invalid let expression")
+        ast.special = LET_LIST
+        for item in ast.value[1:-1]:
+            eval_destructure(item)
+        eval(ast.value[-1])
+    def eval_code_var(ast):
+        if len(ast.value) < 3:
+            raise RuntimeError("Invalid var expression")
+        ast.special = VAR_LIST
+        for item in ast.value[1:-1]:
+            eval_destructure(item)
+        eval(ast.value[-1])
+    def eval_code_set(ast):
+        if len(ast.value) != 3:
+            raise RuntimeError("Invalid set expression")
+        ast.special = SET_LIST
+        for item in ast.value[1:]:
+            eval(item)
+    def eval_code_import(ast):
+        if len(ast.value) < 3:
+            raise RuntimeError("Invalid import expression")
+        ast.special = IMPORT_LIST
+        for item in ast.value[1:-1]:
+            eval_destructure(item)
+        eval(ast.value[-1])
+    def eval_code_values(ast):
+        if len(ast.value) < 2:
+            raise RuntimeError("Invalid values expression")
+        ast.special = VALUES_LIST
+        for item in ast.value[1:]:
+            eval(item)
+    def eval_code_and(ast):
+        if len(ast.value) < 3:
+            raise RuntimeError("Invalid and expression")
+        ast.special = AND_LIST
+        for item in ast.value[1:]:
+            eval(item)
+    def eval_code_or(ast):
+        if len(ast.value) < 3:
+            raise RuntimeError("Invalid or expression")
+        ast.special = AND_LIST
+        for item in ast.value[1:]:
+            eval(item)
+    def eval_code_not(ast):
+        if len(ast.value) != 2:
+            raise RuntimeError("Invalid not expression")
+        ast.special = NOT_LIST
+        eval(ast.value[1])
+    def eval_code_question(ast):
+        if len(ast.value) != 4:
+            raise RuntimeError("Invalid ? expression")
+        ast.special = QUESTION_LIST
+        for item in ast.value[1:]:
+            eval(item)
+    def eval_code_try(ast):
+        raise RuntimeError("not support try")
+    def eval_code_catch(ast):
+        raise RuntimeError("not support catch")
+    def eval_code_finally(ast):
+        raise RuntimeError("not support finally")
+    def eval_code_throw(ast):
+        raise RuntimeError("not support throw")
+
+    specials = {
+        'do': eval_code_do,
+        'match': eval_code_match,
+        'case': eval_code_case,
+        'caseif': eval_code_caseif,
+        'cases': eval_code_cases,
+        'default': eval_code_default,
+        'if': eval_code_if,
+        'elif': eval_code_elif,
+        'else': eval_code_else,
+        'while': eval_code_while,
+        'for': eval_code_for,
+        'each': eval_code_each,
+        'break': eval_code_break,
+        'continue': eval_code_continue,
+        'fn': eval_code_fn,
+        'let': eval_code_let,
+        'var': eval_code_var,
+        'set': eval_code_set,
+        'import': eval_code_import,
+        'values': eval_code_values,
+        'and': eval_code_and,
+        'or': eval_code_or,
+        'not': eval_code_not,
+        '?': eval_code_question,
+        'try': eval_code_try,
+        'catch': eval_code_catch,
+        'finally': eval_code_finally,
+        'throw': eval_code_throw,
+    }
 
     def eval_code(ast):
         if not ast.value:
             raise RuntimeError("Invalid empty code list")
-
-        def eval_do(ast):
-            value = none
-            for exp in ast.value:
-                value = eval(exp)
-            return value
-        def eval_match(ast):
-            expr = ast.value[1]
-            value = eval(expr)
-            for item in ast.value[2:]:
-                eval(item)
-        def eval_case(ast):
-            if len(ast.value) < 3:
-                raise RuntimeError("Invalid case expression")
-            if ast.parent.special != MATCH_LIST:
-                raise RuntimeError("case expression must be in match expression")
-            ast.special = CASE_LIST
-            pattern = ast.value[1]
-            if pattern.suffix != ':':
-                raise RuntimeError("No ':' after case pattern")
-            eval_pattern(pattern)
-            for item in ast.value[2:]:
-                eval(item)
-        def eval_caseif(ast):
-            if len(ast.value) < 4:
-                raise RuntimeError("Invalid caseif expression")
-            if ast.parent.special != MATCH_LIST:
-                raise RuntimeError("caseif expression must be in match expression")
-            ast.special = CASEIF_LIST
-            pattern = ast.value[1]
-            eval_pattern(pattern)
-            cond = ast.value[2]
-            if cond.suffix != ':':
-                raise RuntimeError("No ':' after caseif condition")
-            for item in ast.value[2:]:
-                eval(item)
-        def eval_cases(ast):
-            if len(ast.value) < 3:
-                raise RuntimeError("Invalid cases expression")
-            if ast.parent.special != MATCH_LIST:
-                raise RuntimeError("cases expression must be in match expression")
-            ast.special = CASES_LIST
-            patterns = ast.value[1]
-            if patterns.suffix != ':':
-                raise RuntimeError("No ':' after cases patterns")
-            if patterns.tag != LIST_LIST or not patterns.value:
-                raise RuntimeError("Invalid cases expression")
-            for pattern in patterns.value:
-                eval_pattern(pattern)
-            for item in ast.value[2:]:
-                eval(item)
-        def eval_default(ast):
-            if len(ast.value) < 2:
-                raise RuntimeError("Invalid default expression")
-            if ast.parent.special != MATCH_LIST:
-                raise RuntimeError("default expression must be in match expression")
-            if ast.value[0].suffix != ':':
-                raise RuntimeError("No ':' after default")
-            ast.special = DEFAULT_LIST
-            for item in ast.value[1:]:
-                eval(item)
-        def eval_if(ast):
-            if len(ast.value) < 3:
-                raise RuntimeError("Invalid if expression")
-            ast.special = IF_LIST
-            pred = ast.value[1]
-            if pred.suffix != ':':
-                raise RuntimeError("No ':' after if predication")
-            for item in ast.value[1:]:
-                eval(item)
-        def eval_elif(ast):
-            if len(ast.value) < 3:
-                raise RuntimeError("Invalid elif expression")
-            if ast.prev and ast.prev.special not in (IF_LIST, ELIF_LIST):
-                raise RuntimeError("No previous if/elif expression")
-            ast.special = ELIF_LIST
-            pred = ast.value[1]
-            if pred.suffix != ':':
-                raise RuntimeError("No ':' after elif predication")
-            for item in ast.value[1:]:
-                eval(item)
-        def eval_else(ast):
-            if len(ast.value) < 2:
-                raise RuntimeError("Invalid else expression")
-            if ast.value[0].suffix != ':':
-                raise RuntimeError("No ':' after else")
-            if ast.prev and ast.prev.special not in (IF_LIST, ELIF_LIST, WHILE_LIST, FOR_LIST, EACH_LIST):
-                raise RuntimeError("No previous if/elif/while/for/each expression")
-            ast.special = ELSE_LIST
-            for item in ast.value[1:]:
-                eval(item)
-        def eval_while(ast):
-            if len(ast.value) < 3:
-                raise RuntimeError("Invalid while expression")
-            ast.special = WHILE_LIST
-            pred = ast.value[1]
-            if pred.suffix != ':':
-                raise RuntimeError("No ':' after while predication")
-            for item in ast.value[1:]:
-                eval(item)
-        def eval_for(ast):
-            if len(ast.value) < 3:
-                raise RuntimeError("Invalid for expression")
-            ast.special = FOR_LIST
-            pred = ast.value[1]
-            if pred.suffix != ':':
-                raise RuntimeError("No ':' after for parameter list")
-            if pred.tag != LIST_LIST:
-                raise RuntimeError("Invalid for parameter list")
-            if len(pred.value) not in (3, 4):
-                raise RuntimeError("Invalid for parameter list")
-            if pred.value[0].tag != IDENTIFIER:
-                raise RuntimeError("Invalid for parameter")
-            pred.addvartoscope(pred.value[0].value)
-            for item in pred.value[1:]:
-                eval(item)
-            for item in ast.value[2:]:
-                eval(item)
-        def eval_each(ast):
-            if len(ast.value) < 3:
-                raise RuntimeError("Invalid each expression")
-            ast.special = EACH_LIST
-            pred = ast.value[1]
-            if pred.suffix != ':':
-                raise RuntimeError("No ':' after each parameter list")
-            if pred.tag != LIST_LIST:
-                raise RuntimeError("Invalid each parameter list")
-            if len(pred.value) < 2:
-                raise RuntimeError("Invalid each parameter list")
-            for item in pred.value[:-1]:
-                eval_destructure(item)
-            eval(pred.value[-1])
-            for item in ast.value[2:]:
-                eval(item)
-        def eval_break(ast):
-            ast.special = BREAK_LIST
-        def eval_continue(ast):
-            ast.special = CONTINUE_LIST
-        def eval_fn(ast):
-            if len(ast.value) < 3:
-                raise RuntimeError("Invalid fn expression")
-            ast.special = FN_LIST
-            ai = 1
-            if ast.value[1].tag == IDENTIFIER:
-                ast.addvartoscope(ast.value[1].value)
-                ai = 2
-            arglist = ast.value[ai]
-            if arglist.suffix != ':':
-                raise RuntimeError("No ':' after fn parameter list")
-            if arglist.tag != LIST_LIST:
-                raise RuntimeError("Invalid fn parameter list")
-            for arg in arglist.value:
-                if arg.tag == IDENTIFIER:
-                    arg.addvartoscope(arg.value)
-                elif arg.tag == VARARG:
-                    arg.addvartoscope('...')
-                else:
-                    raise RuntimeError(f"Invalid fn argument: {arg}")
-            for item in ast.value[ai+1:]:
-                eval(item)
-        def eval_let(ast):
-            if len(ast.value) < 3:
-                raise RuntimeError("Invalid let expression")
-            ast.special = LET_LIST
-            for item in ast.value[1:-1]:
-                eval_destructure(item)
-            eval(ast.value[-1])
-        def eval_var(ast):
-            if len(ast.value) < 3:
-                raise RuntimeError("Invalid var expression")
-            ast.special = VAR_LIST
-            for item in ast.value[1:-1]:
-                eval_destructure(item)
-            eval(ast.value[-1])
-        def eval_set(ast):
-            if len(ast.value) != 3:
-                raise RuntimeError("Invalid set expression")
-            ast.special = SET_LIST
-            for item in ast.value[1:]:
-                eval(item)
-        def eval_import(ast):
-            if len(ast.value) < 3:
-                raise RuntimeError("Invalid import expression")
-            ast.special = IMPORT_LIST
-            for item in ast.value[1:-1]:
-                eval_destructure(item)
-            eval(ast.value[-1])
-        def eval_values(ast):
-            if len(ast.value) < 2:
-                raise RuntimeError("Invalid values expression")
-            ast.special = VALUES_LIST
-            for item in ast.value[1:]:
-                eval(item)
-        def eval_and(ast):
-            if len(ast.value) < 3:
-                raise RuntimeError("Invalid and expression")
-            ast.special = AND_LIST
-            for item in ast.value[1:]:
-                eval(item)
-        def eval_or(ast):
-            if len(ast.value) < 3:
-                raise RuntimeError("Invalid or expression")
-            ast.special = AND_LIST
-            for item in ast.value[1:]:
-                eval(item)
-        def eval_not(ast):
-            if len(ast.value) != 2:
-                raise RuntimeError("Invalid not expression")
-            ast.special = NOT_LIST
-            eval(ast.value[1])
-        def eval_question(ast):
-            if len(ast.value) != 4:
-                raise RuntimeError("Invalid ? expression")
-            ast.special = QUESTION_LIST
-            for item in ast.value[1:]:
-                eval(item)
-        def eval_try(ast):
-            raise RuntimeError("not support try")
-        def eval_catch(ast):
-            raise RuntimeError("not support catch")
-        def eval_finally(ast):
-            raise RuntimeError("not support finally")
-        def eval_throw(ast):
-            raise RuntimeError("not support throw")
-        def eval_normal(op, args):
-            pass
-
-        specials = {
-            'do': eval_do,
-            'match': eval_match,
-            'case': eval_case,
-            'caseif': eval_caseif,
-            'cases': eval_cases,
-            'default': eval_default,
-            'if': eval_if,
-            'elif': eval_elif,
-            'else': eval_else,
-            'while': eval_while,
-            'for': eval_for,
-            'each': eval_each,
-            'break': eval_break,
-            'continue': eval_continue,
-            'fn': eval_fn,
-            'let': eval_let,
-            'var': eval_var,
-            'set': eval_set,
-            'import': eval_import,
-            'values': eval_values,
-            'and': eval_and,
-            'or': eval_or,
-            'not': eval_not,
-            '?': eval_question,
-            'try': eval_try,
-            'catch': eval_catch,
-            'finally': eval_finally,
-            'throw': eval_throw,
-        }
-
         op = ast.value[0]
         if op.tag == IDENTIFIER and op.value in specials:
                 return specials[op.value](ast)
@@ -1635,7 +1655,32 @@ def interpret(code):
             args = []
             for item in ast.value[1:]:
                 args.append(eval(item))
-            return eval_normal(op, args)
+            if op.tag not in (CLOSURE, PYFUNCTION)):
+                raise RuntimeError(f'Invalid operator {op}')
+            if op.tag == CLOSURE:
+                frame = mkframe(op.value)
+                frame.upvars = op.upvalues
+                argv = frame.ast.argv
+                if argv and argv[-1] == '...':
+                    if len(args) < len(argv)-1:
+                        raise RuntimeError(f"{op.value}: Too less arguments")
+                    frame.vars = {argv[i]: args[i] for i in range(len(argv)-1)}
+                    frame.vars['...'] = args[len(argv)-1:]
+                elif len(argv) != len(args):
+                    raise RuntimeError(f"{op.value}: argument mismatch")
+                else:
+                    frame.vars = {argv[i]: args[i] for i in range(len(argv))}
+                value = None
+                bodybegin = 3 if frame.ast.value[1].tag == IDENTIFIER else 2
+                for expr in frame.ast.value[bodybegin:]:
+                    value = eval(expr)
+                closeframe(frame.id)
+                return value
+            else:
+                return op.value(args)
+
+    def eval_cond(ast):
+        pass
 
     def eval_hash(ast):
         pass
