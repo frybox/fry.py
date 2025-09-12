@@ -38,7 +38,7 @@ DICT              = 'dict'
 
 # 各种特殊的CODE_LIST
 DO_LIST           = 'do-list'         # new scope
-MATCH_LIST        = 'match-list'
+MATCH_LIST        = 'match-list'      # new scope
 CASE_LIST         = 'case-list'       # new scope
 CASEIF_LIST       = 'caseif-list'     # new scope
 CASES_LIST        = 'cases-list'      # new scope
@@ -94,6 +94,7 @@ PRINT_LIST        = 'print-list'
 
 new_scope_creators = set([
         'do',
+        'match',
         'case',
         'caseif',
         'cases',
@@ -220,6 +221,7 @@ class AstNode:
         if scope.boundvars is None:
             scope.boundvars = set()
         if not candup and name in scope.boundvars:
+            print(scope)
             raise RuntimeError(f"Duplicate definition: {name}")
         scope.boundvars.add(name)
 
@@ -323,6 +325,11 @@ class Frame:
         self.vars = None   # map[name -> value]
         self.upvars = None # map[name -> frameid]
 
+    def setvar(self, name, value):
+        if self.vars is None:
+            self.vars = {}
+        self.vars[name] = value
+
 
 class Value:
     def __init__(self, tag, value=None):
@@ -336,6 +343,14 @@ class Value:
         if not isinstance(other, Value) or self.tag != other.tag:
             return False
         return self.value == other.value
+
+    def __bool__(self):
+        if self.tag in (NONE, FALSE):
+            return False
+        if self.tag in (INTEGER, FLOAT, STRING, LIST, DICT):
+            return bool(self.value)
+        return True
+
 
     def __repr__(self):
         return f'Value({self.tag}, {self.value})'
@@ -1022,11 +1037,18 @@ def parse_code_list(ast):
             if ast.parent.special != MATCH_LIST:
                 raise RuntimeError("case expression must be in match expression")
             ast.special = CASE_LIST
-            pattern = ast.value[1]
-            if pattern.suffix != ':':
+            i = 1
+            while i < len(ast.value):
+                pattern = ast.value[i]
+                i += 1
+                parse_pattern(pattern)
+                if pattern.suffix == ':':
+                    break
+            else:
                 raise RuntimeError("No ':' after case pattern")
-            parse_pattern(pattern)
-            for item in ast.value[2:]:
+            if i >= len(ast.value):
+                raise RuntimeError("No body in case expression")
+            for item in ast.value[i:]:
                 parse(item)
         def parse_caseif(ast):
             if len(ast.value) < 4:
@@ -1034,13 +1056,21 @@ def parse_code_list(ast):
             if ast.parent.special != MATCH_LIST:
                 raise RuntimeError("caseif expression must be in match expression")
             ast.special = CASEIF_LIST
-            pattern = ast.value[1]
-            parse_pattern(pattern)
-            cond = ast.value[2]
-            if cond.suffix != ':':
+            i = 1
+            while i < len(ast.value):
+                pattern = ast.value[i]
+                i += 1
+                if pattern.suffix == ':':
+                    cond = pattern
+                    parse(cond)
+                    break
+                else:
+                    parse_pattern(pattern)
+            else:
                 raise RuntimeError("No ':' after caseif condition")
-            parse(cond)
-            for item in ast.value[3:]:
+            if i >= len(ast.value):
+                raise RuntimeError("No body in case expression")
+            for item in ast.value[i:]:
                 parse(item)
         def parse_cases(ast):
             if len(ast.value) < 3:
@@ -1048,23 +1078,27 @@ def parse_code_list(ast):
             if ast.parent.special != MATCH_LIST:
                 raise RuntimeError("cases expression must be in match expression")
             ast.special = CASES_LIST
-            patterns = ast.value[1]
-            if patterns.suffix != ':':
-                raise RuntimeError("No ':' after cases patterns")
-            if patterns.tag != LIST_LIST or not patterns.value:
-                raise RuntimeError("Invalid cases expression")
             varslist = []
-            for pattern in patterns.value:
+            i = 1
+            while i < len(ast.value):
+                pattern = ast.value[i]
+                i += 1
                 parse_pattern(pattern)
                 varslist.append(ast.boundvars)
                 ast.boundvars = None
+                if pattern.suffix == ':':
+                    break
+            else:
+                raise RuntimeError("No ':' after cases pattern")
             vars = varslist[0]
             for vs in varslist[1:]:
                 if vars != vs:
                     print(ast)
                     raise RuntimeError('not same vars in cases patterns')
             ast.boundvars = vars
-            for item in ast.value[2:]:
+            if i >= len(ast.value):
+                raise RuntimeError("No body in cases expression")
+            for item in ast.value[i:]:
                 parse(item)
         def parse_default(ast):
             if len(ast.value) < 2:
@@ -1358,19 +1392,8 @@ def interpret(code):
                     frame = frames[fid]
                     return Variable(frame.vars, name)
                 elif fid in upvars:      # closed upvar
-                    return Variable(upvars[fid][1], name)
+                    return Variable(upvars[fid], name)
         error(f"Undefined variable {name}")
-
-    def boolean(v):
-        if v.tag in (NONE, FALSE):
-            return False
-        if v.tag == INTEGER:
-            return v.value != 0
-        elif v.tag == FLOAT:
-            return v.value != 0.0
-        elif v.tag in (STRING, LIST, DICT):
-            return len(v.value) != 0
-        return True
 
     def mkframe(ast):
         frame = Frame(ast)
@@ -1395,11 +1418,22 @@ def interpret(code):
             value = eval(exp)
         return value
     def eval_code_match(ast):
+        frame = mkframe(ast)
         expr = ast.value[1]
         value = eval(expr)
+        frame.setvar('$matchvalue', value)
+        frame.setvar('$matched', false)
         for item in ast.value[2:]:
             eval(item)
+            if getvar('$matched').get():
+                break
+        closeframe(frame.id)
     def eval_code_case(ast):
+        # TODO
+        frame = mkframe(ast)
+
+        closeframe(frame.id)
+
         if len(ast.value) < 3:
             raise RuntimeError("Invalid case expression")
         if ast.parent.special != MATCH_LIST:
@@ -1655,7 +1689,7 @@ def interpret(code):
             args = []
             for item in ast.value[1:]:
                 args.append(eval(item))
-            if op.tag not in (CLOSURE, PYFUNCTION)):
+            if op.tag not in (CLOSURE, PYFUNCTION):
                 raise RuntimeError(f'Invalid operator {op}')
             if op.tag == CLOSURE:
                 frame = mkframe(op.value)
