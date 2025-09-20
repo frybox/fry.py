@@ -56,7 +56,7 @@ LET_LIST          = 'let-list'
 VAR_LIST          = 'var-list'
 SET_LIST          = 'set-list'
 IMPORT_LIST       = 'import-list'
-VALUES_LIST       = 'values-list'
+UNLIST_LIST       = 'unlist-list'
 AND_LIST          = 'and-list'
 OR_LIST           = 'or-list'
 NOT_LIST          = 'not-list'
@@ -943,11 +943,7 @@ def parse_pattern(ast):
     elif ast.tag == IDENTIFIER:
         ast.addvartoscope(ast.value)
     elif ast.tag == CODE_LIST:
-        if ast.value and ast.value[0].tag == IDENTIFIER and ast.value[0].value == 'values':
-            for item in ast.value[1:]:
-                parse_pattern(item)
-        else:
-            parse_code_list(ast)
+        parse_code_list(ast)
     elif ast.tag == LIST_LIST:
         for item in ast.value:
             if item.suffix:
@@ -1019,7 +1015,9 @@ def parse_code_list(ast):
             if op.suffix != ':':
                 raise RuntimeError("No ':' after do")
             ast.special = DO_LIST
+            ast.body = []
             for item in ast.value[1:]:
+                ast.body.append(item)
                 parse(item)
         def parse_match(ast):
             if len(ast.value) < 3:
@@ -1028,8 +1026,11 @@ def parse_code_list(ast):
             expr = ast.value[1]
             if expr.suffix != ':':
                 raise RuntimeError("No ':' after match expression")
+            ast.expr = expr
+            ast.body = []
             parse(expr)
             for item in ast.value[2:]:
+                ast.body.append(item)
                 parse(item)
         def parse_case(ast):
             if len(ast.value) < 3:
@@ -1037,9 +1038,12 @@ def parse_code_list(ast):
             if ast.parent.special != MATCH_LIST:
                 raise RuntimeError("case expression must be in match expression")
             ast.special = CASE_LIST
+            ast.pattern = []
+            ast.body = []
             i = 1
             while i < len(ast.value):
                 pattern = ast.value[i]
+                ast.pattern.append(pattern)
                 i += 1
                 parse_pattern(pattern)
                 if pattern.suffix == ':':
@@ -1049,6 +1053,7 @@ def parse_code_list(ast):
             if i >= len(ast.value):
                 raise RuntimeError("No body in case expression")
             for item in ast.value[i:]:
+                ast.body.append(item)
                 parse(item)
         def parse_caseif(ast):
             if len(ast.value) < 4:
@@ -1056,21 +1061,26 @@ def parse_code_list(ast):
             if ast.parent.special != MATCH_LIST:
                 raise RuntimeError("caseif expression must be in match expression")
             ast.special = CASEIF_LIST
+            ast.pattern = []
+            ast.body = []
             i = 1
             while i < len(ast.value):
                 pattern = ast.value[i]
                 i += 1
                 if pattern.suffix == ':':
                     cond = pattern
+                    ast.condition = cond
                     parse(cond)
                     break
                 else:
+                    ast.pattern.append(pattern)
                     parse_pattern(pattern)
             else:
                 raise RuntimeError("No ':' after caseif condition")
             if i >= len(ast.value):
                 raise RuntimeError("No body in case expression")
             for item in ast.value[i:]:
+                ast.body.append(item)
                 parse(item)
         def parse_cases(ast):
             if len(ast.value) < 3:
@@ -1078,10 +1088,13 @@ def parse_code_list(ast):
             if ast.parent.special != MATCH_LIST:
                 raise RuntimeError("cases expression must be in match expression")
             ast.special = CASES_LIST
+            ast.patterns = []
+            ast.body = []
             varslist = []
             i = 1
             while i < len(ast.value):
                 pattern = ast.value[i]
+                ast.patterns.append(pattern)
                 i += 1
                 parse_pattern(pattern)
                 varslist.append(ast.boundvars)
@@ -1099,6 +1112,7 @@ def parse_code_list(ast):
             if i >= len(ast.value):
                 raise RuntimeError("No body in cases expression")
             for item in ast.value[i:]:
+                ast.body.append(item)
                 parse(item)
         def parse_default(ast):
             if len(ast.value) < 2:
@@ -1108,7 +1122,9 @@ def parse_code_list(ast):
             if ast.value[0].suffix != ':':
                 raise RuntimeError("No ':' after default")
             ast.special = DEFAULT_LIST
+            ast.body = []
             for item in ast.value[1:]:
+                ast.body.append(item)
                 parse(item)
         def parse_if(ast):
             if len(ast.value) < 3:
@@ -1117,7 +1133,10 @@ def parse_code_list(ast):
             pred = ast.value[1]
             if pred.suffix != ':':
                 raise RuntimeError("No ':' after if predication")
+            ast.condition = pred
+            ast.body = []
             for item in ast.value[1:]:
+                ast.body.append(item)
                 parse(item)
             parent = ast.parent
             i = parent.index(ast)
@@ -1286,10 +1305,10 @@ def parse_code_list(ast):
             # 绑定标识符应放到求值之后
             for item in ast.value[1:-1]:
                 parse_destructure(item)
-        def parse_values(ast):
+        def parse_unlist(ast):
             if len(ast.value) < 2:
-                raise RuntimeError("Invalid values expression")
-            ast.special = VALUES_LIST
+                raise RuntimeError("Invalid unlist expression")
+            ast.special = UNLIST_LIST
             for item in ast.value[1:]:
                 parse(item)
         def parse_and(ast):
@@ -1344,7 +1363,7 @@ def parse_code_list(ast):
             'var': parse_var,
             'set': parse_set,
             'import': parse_import,
-            'values': parse_values,
+            'unlist': parse_unlist,
             'and': parse_and,
             'or': parse_or,
             'not': parse_not,
@@ -1414,16 +1433,16 @@ def interpret(code):
 
     def eval_code_do(ast):
         value = none
-        for exp in ast.value:
+        for exp in ast.body:
             value = eval(exp)
         return value
     def eval_code_match(ast):
         frame = mkframe(ast)
-        expr = ast.value[1]
+        expr = ast.expr
         value = eval(expr)
         frame.setvar('$matchvalue', value)
         frame.setvar('$matched', false)
-        for item in ast.value[2:]:
+        for item in ast.body:
             eval(item)
             if getvar('$matched').get():
                 break
@@ -1609,10 +1628,10 @@ def interpret(code):
         for item in ast.value[1:-1]:
             eval_destructure(item)
         eval(ast.value[-1])
-    def eval_code_values(ast):
+    def eval_code_unlist(ast):
         if len(ast.value) < 2:
-            raise RuntimeError("Invalid values expression")
-        ast.special = VALUES_LIST
+            raise RuntimeError("Invalid unlist expression")
+        ast.special = UNLIST_LIST
         for item in ast.value[1:]:
             eval(item)
     def eval_code_and(ast):
@@ -1667,7 +1686,7 @@ def interpret(code):
         'var': eval_code_var,
         'set': eval_code_set,
         'import': eval_code_import,
-        'values': eval_code_values,
+        'unlist': eval_code_unlist,
         'and': eval_code_and,
         'or': eval_code_or,
         'not': eval_code_not,
