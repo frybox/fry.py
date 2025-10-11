@@ -56,7 +56,7 @@ LET_LIST          = 'let-list'
 VAR_LIST          = 'var-list'
 SET_LIST          = 'set-list'
 IMPORT_LIST       = 'import-list'
-UNLIST_LIST       = 'unlist-list'
+PASS_LIST         = 'pass-list'
 AND_LIST          = 'and-list'
 OR_LIST           = 'or-list'
 NOT_LIST          = 'not-list'
@@ -1305,10 +1305,8 @@ def parse_code_list(ast):
             # 绑定标识符应放到求值之后
             for item in ast.value[1:-1]:
                 parse_destructure(item)
-        def parse_unlist(ast):
-            if len(ast.value) < 2:
-                raise RuntimeError("Invalid unlist expression")
-            ast.special = UNLIST_LIST
+        def parse_pass(ast):
+            ast.special = PASS_LIST
             for item in ast.value[1:]:
                 parse(item)
         def parse_and(ast):
@@ -1363,7 +1361,7 @@ def parse_code_list(ast):
             'var': parse_var,
             'set': parse_set,
             'import': parse_import,
-            'unlist': parse_unlist,
+            'pass': parse_pass,
             'and': parse_and,
             'or': parse_or,
             'not': parse_not,
@@ -1628,10 +1626,8 @@ def interpret(code):
         for item in ast.value[1:-1]:
             eval_destructure(item)
         eval(ast.value[-1])
-    def eval_code_unlist(ast):
-        if len(ast.value) < 2:
-            raise RuntimeError("Invalid unlist expression")
-        ast.special = UNLIST_LIST
+    def eval_code_pass(ast):
+        ast.special = PASS_LIST
         for item in ast.value[1:]:
             eval(item)
     def eval_code_and(ast):
@@ -1686,7 +1682,7 @@ def interpret(code):
         'var': eval_code_var,
         'set': eval_code_set,
         'import': eval_code_import,
-        'unlist': eval_code_unlist,
+        'pass': eval_code_pass,
         'and': eval_code_and,
         'or': eval_code_or,
         'not': eval_code_not,
